@@ -1,0 +1,43 @@
+# SyncTune Apache Root Configuration
+# InfinityFree Cache-Bypass + Authorization Header Pass-through
+
+# ── Priority: serve index.php first (bypasses Varnish), then index.html ──
+DirectoryIndex index.php index.html
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Redirect index.html requests to index.php to bypass browser cache of static HTML
+    RewriteRule ^index\.html$ index.php [R=302,L]
+
+    # Pass Authorization Header to PHP environment securely
+    RewriteCond %{HTTP:Authorization} .
+    RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+</IfModule>
+
+# ── Disable caching for HTML and PHP files ──
+# (Varnish ignores these for PHP, but this protects browsers)
+<FilesMatch "\.(html|htm|php)$">
+    <IfModule mod_headers.c>
+        Header set Cache-Control "no-cache, no-store, must-revalidate, max-age=0"
+        Header set Pragma "no-cache"
+        Header set Expires "Thu, 01 Jan 1970 00:00:00 GMT"
+        Header unset ETag
+        FileETag None
+    </IfModule>
+</FilesMatch>
+
+# ── Revalidate JS and CSS assets to prevent browsers freezing outdated scripts ──
+<FilesMatch "\.(js|css)$">
+    <IfModule mod_headers.c>
+        Header set Cache-Control "no-cache, must-revalidate"
+        Header set Pragma "no-cache"
+    </IfModule>
+</FilesMatch>
+
+# ── Allow caching for static media/fonts ──
+<FilesMatch "\.(svg|png|jpg|ico|woff2?)$">
+    <IfModule mod_headers.c>
+        Header set Cache-Control "public, max-age=86400"
+    </IfModule>
+</FilesMatch>

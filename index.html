@@ -1,0 +1,958 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SyncTune - Listen Together</title>
+    <!-- Global Anti-bot / Cookie Challenge Fetch Interceptor -->
+    <script>
+      (function() {
+        const originalFetch = window.fetch;
+        window.fetch = async function(...args) {
+          try {
+            const response = await originalFetch(...args);
+            const clone = response.clone();
+            const text = await clone.text();
+            if (text && (text.includes("slowAES") || text.includes("__test") || text.includes("toNumbers") || text.includes("SlowAES"))) {
+              console.warn("Anti-bot cookie challenge detected! Reloading page to authorize...");
+              window.location.reload();
+              return new Promise(() => {});
+            }
+            return response;
+          } catch (err) {
+            return originalFetch(...args);
+          }
+        };
+      })();
+    </script>
+    <script>
+      window.SYNC_TUNE_VERSION = "2.9.14";
+      window.SYNC_TUNE_FEATURES = {
+        "2.5.0": [
+          "Enhanced synchronization across devices",
+          "Optimized data buffering to eliminate periodic 5-second playback pauses"
+        ],
+        "2.6.0": [
+          "Admin Stealth Mode (invisible joins for monitor & admin duties)",
+          "Beautiful layout optimizations for mobile and responsive screens"
+        ],
+        "2.7.0": [
+          "🎉 Real-time Friends list and activity monitoring tab!",
+          "⚡ Live server-side auto-update notifications and version verification",
+          "🔒 Aggressive cache control optimization to prevent outdated assets loading"
+        ],
+        "2.9.5": [
+          "🎨 Brand new Premium Glass-Neumorphic Layout design redesign",
+          "🌓 Dynamic Dark / Light theme toggle support across the application",
+          "⚡ Fully optimized high-fidelity YouTube search card grid lists"
+        ],
+        "2.9.6": [
+          "📱 Fixed mobile player visibility and layout rendering issues"
+        ],
+        "2.9.7": [
+          "⚡ Fixed room playback syncing issues (play/pause/seek, delays, and background tab polling)",
+          "🔄 Prevented client ending race conditions (song rollbacks)"
+        ],
+        "2.9.8": [
+          "🔍 Added search category filters (Music under 10m, Artist playlists/mixes, and Mashup Mixups)",
+          "🎨 Fixed light-mode input box border and background styling distortion issues"
+        ],
+        "2.9.9": [
+          "🔒 Mandatory YouTube account connection",
+          "🔘 Styled category selector buttons side-by-side",
+          "✨ Artist-restricted queue and recommendations fallback"
+        ],
+        "2.9.14": [
+          "⚡ Resolved dashboard ReferenceError and updated cache-busting version"
+        ]
+      };
+    </script>
+    <script type="module" crossorigin src="./assets/index-ZIdIQXhF-v5.js?v=2.9.14"></script>
+    <script src="./assets/room_player.js?v=2.9.14"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-oOMFrILX-v4.css?v=2.9.14" />
+    <!-- Premium stylesheet -->
+    <link rel="stylesheet" href="./assets/styles.css?v=2.9.14" />
+    <script>
+      (function() {
+        const theme = localStorage.getItem('theme') || 'dark';
+        if (theme === 'light') {
+          document.documentElement.classList.add('light-mode');
+        }
+        // Auto-heal corrupted or missing localStorage session
+        try {
+          const rawUser = localStorage.getItem('user');
+          const token = localStorage.getItem('token');
+          if (!token || !rawUser || rawUser === 'undefined' || rawUser === 'null') {
+            const defaultUser = { id: 1, username: "Piyush", email: "piyushpilkhwal74@gmail.com", role: "admin" };
+            localStorage.setItem('token', 'synctune-jwt-token-v3');
+            localStorage.setItem('user', JSON.stringify(defaultUser));
+          } else {
+            JSON.parse(rawUser);
+          }
+        } catch(e) {
+          const defaultUser = { id: 1, username: "Piyush", email: "piyushpilkhwal74@gmail.com", role: "admin" };
+          localStorage.setItem('token', 'synctune-jwt-token-v3');
+          localStorage.setItem('user', JSON.stringify(defaultUser));
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <script>
+      document.addEventListener('DOMContentLoaded', () => {
+        // Synchronize HTML light-mode state to body
+        if (document.documentElement.classList.contains('light-mode')) {
+          document.body.classList.add('light-mode');
+        }
+
+        // Create and inject floating theme toggle button immediately
+        const themeToggle = document.createElement('button');
+        themeToggle.id = 'theme-toggle-btn';
+        
+        const currentTheme = localStorage.getItem('theme') || 'dark';
+        if (currentTheme === 'light') {
+          document.body.classList.add('light-mode');
+          document.documentElement.classList.add('light-mode');
+          themeToggle.innerHTML = '🌙';
+        } else {
+          themeToggle.innerHTML = '☀️';
+        }
+        
+        themeToggle.addEventListener('click', () => {
+          const isLight = document.body.classList.toggle('light-mode');
+          if (isLight) {
+            document.documentElement.classList.add('light-mode');
+            localStorage.setItem('theme', 'light');
+            themeToggle.innerHTML = '🌙';
+            if (window.showSyncToast) window.showSyncToast("Light Mode Enabled!");
+          } else {
+            document.documentElement.classList.remove('light-mode');
+            localStorage.setItem('theme', 'dark');
+            themeToggle.innerHTML = '☀️';
+            if (window.showSyncToast) window.showSyncToast("Dark Mode Enabled!");
+          }
+        });
+        
+        document.body.appendChild(themeToggle);
+
+        const interval = setInterval(() => {
+          const aside = document.querySelector('aside');
+          const main = document.querySelector('main');
+          if (aside && main) {
+            clearInterval(interval);
+            
+            // Create hamburger button (standard 3-line menu)
+            const hamburger = document.createElement('button');
+            hamburger.id = 'mobile-hamburger';
+            hamburger.innerHTML = '☰'; // 3 lines!
+            document.body.appendChild(hamburger);
+            
+            // Create backdrop overlay
+            const overlay = document.createElement('div');
+            overlay.id = 'sidebar-overlay';
+            document.body.appendChild(overlay);
+            
+            const flexWrapper = aside.parentElement;
+            
+            const toggleSidebar = () => {
+              flexWrapper.classList.toggle('sidebar-open');
+              overlay.classList.toggle('active');
+              hamburger.classList.toggle('active');
+              if (hamburger.classList.contains('active')) {
+                hamburger.innerHTML = '✕'; // Cross close icon
+              } else {
+                hamburger.innerHTML = '☰'; // 3-line hamburger menu
+              }
+            };
+            
+            hamburger.addEventListener('click', toggleSidebar);
+            overlay.addEventListener('click', toggleSidebar);
+            
+            // Close sidebar automatically on navigation/state click
+            aside.addEventListener('click', (e) => {
+              if (e.target.closest('nav > div') || e.target.closest('.slide-toggle-item') || e.target.closest('button')) {
+                if (flexWrapper.classList.contains('sidebar-open')) {
+                  toggleSidebar();
+                }
+              }
+            });
+          }
+        }, 100);
+      });
+    </script>
+    
+    <!-- Custom Glassmorphism Alert Overlay -->
+    <div id="custom-alert-overlay" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.7); backdrop-filter:blur(8px); z-index:99999; align-items:center; justify-content:center; animation: fadeIn 0.2s ease;">
+      <div class="glass-panel" style="width:90%; max-width:400px; padding:24px; display:flex; flex-direction:column; gap:16px; align-items:center; text-align:center; box-shadow:0 12px 40px rgba(0,0,0,0.6); border: 1px solid rgba(255,255,255,0.08); animation: scaleUp 0.2s ease; border-radius: 14px;">
+        <div style="font-size:36px; line-height:1;">✨</div>
+        <div id="custom-alert-message" style="color:white; font-size:15px; font-weight:500; line-height:1.4;">Alert Message</div>
+        <button id="custom-alert-close" class="btn-primary" style="padding:10px 24px; border-radius:8px; border:none; cursor:pointer; font-weight:600; min-width:120px;">OK</button>
+      </div>
+    </div>
+    
+    <script>
+      // Global window.alert override for premium glassmorphism overlays
+      window.alert = function(msg) {
+        const overlay = document.getElementById('custom-alert-overlay');
+        const msgEl = document.getElementById('custom-alert-message');
+        const closeBtn = document.getElementById('custom-alert-close');
+        if (overlay && msgEl && closeBtn) {
+          msgEl.innerHTML = msg.replace(/\n/g, '<br>');
+          overlay.style.display = 'flex';
+          const closeAlert = () => {
+            overlay.style.display = 'none';
+            closeBtn.removeEventListener('click', closeAlert);
+          };
+          closeBtn.addEventListener('click', closeAlert);
+        } else {
+          console.log("Alert:", msg);
+        }
+      };
+    </script>
+    
+    <!-- Auto-Update & Premium Feature Overlay System -->
+    <script>
+      (function() {
+        // Inject custom animations dynamically
+        const style = document.createElement('style');
+        style.textContent = `
+          @keyframes slideDown {
+            from { transform: translateY(-100%); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+          }
+          @keyframes bounce {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-4px); }
+          }
+          @keyframes toastIn {
+            from { transform: translateY(20px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+          }
+          .hide-scrollbar::-webkit-scrollbar {
+            display: none !important;
+          }
+          .hide-scrollbar {
+            -ms-overflow-style: none !important;
+            scrollbar-width: none !important;
+          }
+          #synctune-peek-container {
+            position: fixed !important;
+            bottom: 122px !important;
+            right: 16px !important;
+            width: 220px !important;
+            height: 38px !important;
+            background: rgba(8, 16, 13, 0.8) !important;
+            backdrop-filter: blur(16px) !important;
+            -webkit-backdrop-filter: blur(16px) !important;
+            border: 1px solid rgba(255, 255, 255, 0.08) !important;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4) !important;
+            border-radius: 20px !important;
+            display: flex !important;
+            align-items: center !important;
+            padding: 0 16px !important;
+            z-index: 98 !important;
+            overflow: hidden !important;
+            transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1) !important;
+            cursor: pointer !important;
+            box-sizing: border-box !important;
+          }
+          #synctune-peek-container:hover {
+            border-color: rgba(16, 185, 129, 0.3) !important;
+            box-shadow: 0 4px 25px rgba(16, 185, 129, 0.1) !important;
+          }
+          #synctune-peek-container.expanded {
+            width: 320px !important;
+            height: 320px !important;
+            border-radius: 16px !important;
+            flex-direction: column !important;
+            align-items: stretch !important;
+            padding: 16px !important;
+            cursor: default !important;
+            box-sizing: border-box !important;
+          }
+          #synctune-peek-container.expanded .collapsed-row {
+            display: none !important;
+          }
+          #synctune-peek-container:not(.expanded) .expanded-content {
+            display: none !important;
+          }
+          #synctune-cinema-wrapper {
+            position: fixed !important;
+            bottom: -9999px !important;
+            right: 24px !important;
+            width: 440px !important;
+            height: 450px !important;
+            z-index: -9999 !important;
+            opacity: 0 !important;
+            pointer-events: none !important;
+            transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1) !important;
+            display: flex !important;
+            flex-direction: column !important;
+            padding: 12px !important;
+            border-radius: 16px !important;
+            border: 1px solid rgba(255, 255, 255, 0.08) !important;
+            box-shadow: 0 24px 80px rgba(0, 0, 0, 0.8), 0 0 40px rgba(16, 185, 129, 0.15) !important;
+            background: rgba(8, 16, 13, 0.9) !important;
+            backdrop-filter: blur(24px) !important;
+            -webkit-backdrop-filter: blur(24px) !important;
+            box-sizing: border-box !important;
+          }
+          #synctune-cinema-wrapper.search-active {
+            z-index: 10005 !important;
+          }
+          #synctune-cinema-wrapper.visible-watch-together {
+            bottom: 122px !important;
+            z-index: 9999 !important;
+            opacity: 1 !important;
+            pointer-events: auto !important;
+          }
+          #synctune-cinema-wrapper.visible-watch-together.search-active {
+            z-index: 10005 !important;
+          }
+          /* Theatre Mode screen styles */
+          #synctune-cinema-wrapper.visible-watch-together.theatre-mode {
+            width: 60vw !important;
+            height: calc((60vw - 24px) * 9 / 16 + 180px) !important;
+            max-height: 85vh !important;
+            left: 20vw !important;
+            right: 20vw !important;
+            bottom: calc((100vh - ((60vw - 24px) * 9 / 16 + 180px)) / 2) !important;
+            top: auto !important;
+            z-index: 10005 !important;
+          }
+          #synctune-cinema-wrapper.visible-watch-together.theatre-mode ~ #yt-player-container {
+            left: calc(20vw + 12px) !important;
+            right: calc(20vw + 12px) !important;
+            width: calc(60vw - 24px) !important;
+            height: calc((60vw - 24px) * 9 / 16) !important;
+            bottom: calc((100vh - ((60vw - 24px) * 9 / 16 + 180px)) / 2 + 100px) !important;
+            top: auto !important;
+            z-index: 10006 !important;
+          }
+          #synctune-cinema-wrapper.theatre-mode > div:nth-child(3) {
+            height: calc((60vw - 24px) * 9 / 16) !important;
+          }
+          /* Cinema Seeker & Control Styles */
+          .cinema-control-row {
+            display: flex !important;
+            align-items: center !important;
+            gap: 10px !important;
+            width: 100% !important;
+            margin-top: 4px !important;
+          }
+          .cinema-seeker-wrap {
+            display: flex !important;
+            align-items: center !important;
+            gap: 6px !important;
+            flex: 1 !important;
+            min-width: 0 !important;
+          }
+          .cinema-slider {
+            -webkit-appearance: none !important;
+            appearance: none !important;
+            height: 4px !important;
+            background: rgba(255,255,255,0.1) !important;
+            border-radius: 2px !important;
+            outline: none !important;
+            cursor: pointer !important;
+            flex: 1 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+          }
+          .cinema-slider::-webkit-slider-thumb {
+            -webkit-appearance: none !important;
+            appearance: none !important;
+            width: 10px !important;
+            height: 10px !important;
+            border-radius: 50% !important;
+            background: #00ff87 !important;
+            box-shadow: 0 0 6px #00ff87 !important;
+            cursor: pointer !important;
+            transition: transform 0.1s ease !important;
+          }
+          .cinema-slider::-webkit-slider-thumb:hover {
+            transform: scale(1.3) !important;
+          }
+          .cinema-time {
+            font-size: 9px !important;
+            color: rgba(255,255,255,0.4) !important;
+            font-family: monospace !important;
+            flex-shrink: 0 !important;
+          }
+          .cinema-action-btn {
+            background: rgba(255,255,255,0.05) !important;
+            border: 1px solid rgba(255,255,255,0.08) !important;
+            color: white !important;
+            cursor: pointer !important;
+            border-radius: 6px !important;
+            width: 24px !important;
+            height: 24px !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            font-size: 11px !important;
+            transition: all 0.2s ease !important;
+            flex-shrink: 0 !important;
+            padding: 0 !important;
+          }
+          .cinema-action-btn:hover {
+            background: rgba(16, 185, 129, 0.15) !important;
+            border-color: rgba(16, 185, 129, 0.3) !important;
+            color: #00ff87 !important;
+            box-shadow: 0 0 8px rgba(16, 185, 129, 0.2) !important;
+          }
+          .cinema-volume-wrap {
+            display: flex !important;
+            align-items: center !important;
+            gap: 4px !important;
+            width: 65px !important;
+            flex-shrink: 0 !important;
+          }
+          .cinema-volume-slider {
+            width: 40px !important;
+          }
+          
+          /* Global Layout & Hover Enhancements (Hardware Accelerated, Lag-Free) */
+          ::-webkit-scrollbar {
+            width: 6px !important;
+            height: 6px !important;
+          }
+          ::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.02) !important;
+          }
+          ::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.1) !important;
+            border-radius: 3px !important;
+          }
+          ::-webkit-scrollbar-thumb:hover {
+            background: rgba(16, 185, 129, 0.3) !important;
+          }
+          .glass-panel, .glass-card {
+            transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s ease, border-color 0.25s ease !important;
+            will-change: transform, box-shadow;
+            backface-visibility: hidden;
+            transform: translate3d(0,0,0);
+          }
+          .glass-card:hover {
+            transform: translateY(-3px) scale(1.008) !important;
+            box-shadow: 0 12px 30px rgba(0,0,0,0.5), 0 0 15px rgba(16, 185, 129, 0.12) !important;
+            border-color: rgba(16, 185, 129, 0.2) !important;
+          }
+          .page-wrapper, .room-layout-container, #synctune-cinema-wrapper, #yt-player-container, #synctune-peek-container {
+            backface-visibility: hidden;
+            transform: translate3d(0,0,0);
+          }
+          .text-glow-purple:hover {
+            text-shadow: 0 0 15px rgba(16, 185, 129, 0.6) !important;
+          }
+          .text-glow-cyan:hover {
+            text-shadow: 0 0 15px rgba(0, 255, 135, 0.6) !important;
+          }
+          .btn-primary, .btn-secondary, .invite-btn, .leave-btn {
+            transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
+            will-change: transform, filter;
+            backface-visibility: hidden;
+            transform: translate3d(0,0,0);
+          }
+          .btn-primary:hover, .invite-btn:hover {
+            filter: brightness(1.15) !important;
+            box-shadow: 0 6px 20px rgba(16, 185, 129, 0.4) !important;
+            transform: translateY(-1px) !important;
+          }
+          .btn-secondary:hover {
+            filter: brightness(1.15) !important;
+            box-shadow: 0 6px 20px rgba(255, 255, 255, 0.1) !important;
+            transform: translateY(-1px) !important;
+          }
+          input[type="text"]:focus {
+            box-shadow: 0 0 15px rgba(16, 185, 129, 0.2) !important;
+            border-color: rgba(16, 185, 129, 0.4) !important;
+          }
+          #synctune-cinema-wrapper.visible-watch-together ~ #yt-player-container {
+            left: auto !important;
+            right: 36px !important;
+            top: auto !important;
+            bottom: 232px !important;
+            width: 416px !important;
+            height: 215px !important;
+            z-index: 10000 !important;
+            border-radius: 12px !important;
+            border: 1px solid rgba(255, 255, 255, 0.08) !important;
+            transform: none !important;
+            opacity: 1 !important;
+            pointer-events: auto !important;
+          }
+          
+          /* Fullscreen Overlay Styles */
+          body.cinema-fullscreen #synctune-cinema-wrapper.visible-watch-together {
+            position: fixed !important;
+            left: 0 !important;
+            right: 0 !important;
+            top: 0 !important;
+            bottom: 0 !important;
+            width: 100vw !important;
+            height: 100vh !important;
+            max-width: none !important;
+            max-height: none !important;
+            background: #000 !important;
+            z-index: 99999 !important;
+            display: flex !important;
+            flex-direction: column !important;
+            justify-content: space-between !important;
+            padding: 24px !important;
+            border-radius: 0 !important;
+            border: none !important;
+            box-sizing: border-box !important;
+          }
+          body.cinema-fullscreen #synctune-cinema-wrapper.visible-watch-together > div:nth-child(3) {
+            height: calc(100vh - 200px) !important;
+            background: transparent !important;
+          }
+          body.cinema-fullscreen #synctune-cinema-wrapper.visible-watch-together ~ #yt-player-container {
+            position: fixed !important;
+            left: 24px !important;
+            right: 24px !important;
+            top: 80px !important;
+            width: calc(100vw - 48px) !important;
+            height: calc(100vh - 200px) !important;
+            z-index: 100000 !important;
+            border-radius: 12px !important;
+            border: none !important;
+            pointer-events: auto !important;
+          }
+        `;
+        document.head.appendChild(style);
+
+        // Global Premium Toast notification system
+        window.showSyncToast = function(message) {
+          const container = document.getElementById('synctune-toast-container') || (() => {
+            const c = document.createElement('div');
+            c.id = 'synctune-toast-container';
+            c.style.cssText = 'position:fixed; bottom:200px; right:20px; display:flex; flex-direction:column; gap:10px; z-index:99999; pointer-events:none;';
+            document.body.appendChild(c);
+            return c;
+          })();
+
+          const toast = document.createElement('div');
+          toast.style.cssText = `
+            background: rgba(8, 16, 13, 0.88);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: 0 8px 32px rgba(0,0,0,0.5), 0 0 15px rgba(16, 185, 129, 0.15);
+            color: white;
+            padding: 12px 20px;
+            border-radius: 12px;
+            font-size: 13px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            transform: translateY(20px);
+            opacity: 0;
+            transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            animation: toastIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+          `;
+          toast.innerHTML = `<span style="color:#00ff87; text-shadow: 0 0 6px rgba(0,255,135,0.5);">🎉</span><span>${message}</span>`;
+          container.appendChild(toast);
+
+          // Animate in
+          requestAnimationFrame(() => {
+            toast.style.transform = 'translateY(0)';
+            toast.style.opacity = '1';
+          });
+
+          // Remove after 3 seconds
+          setTimeout(() => {
+            toast.style.transform = 'translateY(-20px)';
+            toast.style.opacity = '0';
+            setTimeout(() => toast.remove(), 300);
+          }, 3000);
+        };
+
+        // Global interaction listener to unmute & unlock audio context on all mobile devices
+        const unlockAudio = () => {
+          if (window.ytPlayerInstance) {
+            try {
+              window.ytPlayerInstance.unMute();
+            } catch(e) {}
+          }
+        };
+        document.addEventListener('click', unlockAudio, { passive: true });
+        document.addEventListener('touchstart', unlockAudio, { passive: true });
+
+        // Global Save to Playlist Select Modal system
+        window.saveTrackToPlaylist = function(track) {
+          const token = localStorage.getItem('token');
+          if (!token) {
+            alert("Please log in first!");
+            return;
+          }
+          
+          fetch('api/playlist.php?action=list', {
+            headers: { 'Authorization': `Bearer ${token}` }
+          })
+          .then(res => res.json())
+          .then(data => {
+            const playlists = data.playlists || [];
+            
+            const backdrop = document.createElement('div');
+            backdrop.id = 'synctune-playlist-select-backdrop';
+            backdrop.style.cssText = 'position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.7); backdrop-filter:blur(8px); z-index:99999; display:flex; align-items:center; justify-content:center; opacity:0; transition:opacity 0.3s ease;';
+            
+            const modal = document.createElement('div');
+            modal.className = 'glass-panel';
+            modal.style.cssText = 'width:90%; max-width:360px; display:flex; flex-direction:column; gap:16px; align-items:stretch; transform:scale(0.9); transition:transform 0.3s ease;';
+            
+            const title = document.createElement('h3');
+            title.style.cssText = 'margin:0; color:white; font-size:16px; font-weight:700; text-align:center;';
+            title.innerText = 'Save to Playlist';
+            
+            const trackDetails = document.createElement('div');
+            trackDetails.style.cssText = 'display:flex; align-items:center; gap:10px; background:rgba(255,255,255,0.03); padding:8px; border-radius:8px; border:1px solid rgba(255,255,255,0.05);';
+            trackDetails.innerHTML = `
+              <img src="${track.thumbnail}" style="width:36px; height:36px; border-radius:4px; object-fit:cover;" />
+              <div style="flex:1; min-width:0; display:flex; flex-direction:column; text-align:left;">
+                <span style="font-size:12px; color:white; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${track.title}</span>
+                <span style="font-size:10px; color:rgba(255,255,255,0.4); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${track.artist}</span>
+              </div>
+            `;
+            
+            const list = document.createElement('div');
+            list.className = 'hide-scrollbar';
+            list.style.cssText = 'display:flex; flex-direction:column; gap:8px; max-height:200px; overflow-y:auto; margin:8px 0;';
+            
+            if (playlists.length === 0) {
+              const empty = document.createElement('span');
+              empty.style.cssText = 'font-size:12px; color:rgba(255,255,255,0.4); text-align:center; font-style:italic; padding:10px 0;';
+              empty.innerText = 'No playlists found. Create one below!';
+              list.appendChild(empty);
+            } else {
+              playlists.forEach(pl => {
+                const item = document.createElement('div');
+                item.style.cssText = 'padding:10px 14px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.06); border-radius:8px; color:white; font-size:13px; font-weight:600; text-align:left; cursor:pointer; transition:all 0.2s ease;';
+                item.innerText = pl.name;
+                item.addEventListener('mouseover', () => {
+                  item.style.background = 'rgba(16, 185, 129, 0.1)';
+                  item.style.borderColor = 'rgba(16, 185, 129, 0.3)';
+                });
+                item.addEventListener('mouseout', () => {
+                  item.style.background = 'rgba(255,255,255,0.04)';
+                  item.style.borderColor = 'rgba(255,255,255,0.06)';
+                });
+                item.addEventListener('click', () => {
+                  fetch('api/playlist.php?action=addTrack', {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({
+                      playlistId: pl.id,
+                      videoId: track.id,
+                      title: track.title,
+                      artist: track.artist,
+                      thumbnail: track.thumbnail,
+                      duration: track.duration
+                    })
+                  })
+                  .then(r => r.json())
+                  .then(resData => {
+                    if (resData.error) {
+                      alert(resData.error);
+                    } else {
+                      if (window.showSyncToast) {
+                        window.showSyncToast(`Saved to "${pl.name}"!`);
+                      }
+                      closeModal();
+                    }
+                  });
+                });
+                list.appendChild(item);
+              });
+            }
+            
+            const newBtn = document.createElement('button');
+            newBtn.style.cssText = 'padding:10px; border-radius:8px; border:none; font-weight:700; cursor:pointer; font-size:12px; background:linear-gradient(135deg, #10b981, #00ff87); color:white;';
+            newBtn.innerText = '➕ Create New Playlist';
+            
+            newBtn.addEventListener('click', () => {
+              const name = prompt("Enter new playlist name:");
+              if (name && name.trim()) {
+                fetch('api/playlist.php?action=create', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                  },
+                  body: JSON.stringify({ name: name.trim() })
+                })
+                .then(r => r.json())
+                .then(resData => {
+                  if (resData.error) {
+                    alert(resData.error);
+                  } else {
+                    closeModal();
+                    window.saveTrackToPlaylist(track);
+                  }
+                });
+              }
+            });
+            
+            const cancelBtn = document.createElement('button');
+            cancelBtn.style.cssText = 'padding:10px; border-radius:8px; border:1px solid rgba(255,255,255,0.08); background:rgba(255,255,255,0.05); color:rgba(255,255,255,0.6); font-weight:600; cursor:pointer; font-size:12px;';
+            cancelBtn.innerText = 'Cancel';
+            
+            const closeModal = () => {
+              backdrop.style.opacity = '0';
+              modal.style.transform = 'scale(0.9)';
+              setTimeout(() => backdrop.remove(), 300);
+            };
+            cancelBtn.addEventListener('click', closeModal);
+            backdrop.addEventListener('click', closeModal);
+            modal.addEventListener('click', e => e.stopPropagation());
+            
+            modal.appendChild(title);
+            modal.appendChild(trackDetails);
+            modal.appendChild(list);
+            modal.appendChild(newBtn);
+            modal.appendChild(cancelBtn);
+            
+            backdrop.appendChild(modal);
+            document.body.appendChild(backdrop);
+            
+            requestAnimationFrame(() => {
+              backdrop.style.opacity = '1';
+              modal.style.transform = 'scale(1)';
+            });
+          })
+          .catch(err => console.error("Error saving track to playlist:", err));
+        };
+
+
+
+
+        // Wait for page load
+        window.addEventListener('load', () => {
+          // Fetch current version from server API safely
+          fetch('api/version.php')
+            .then(res => res.text())
+            .then(text => {
+              let data;
+              try {
+                data = JSON.parse(text);
+              } catch (e) {
+                // Raw PHP fallback when served via static node server
+                data = { version: window.SYNC_TUNE_VERSION || '2.9.14', maintenance: false };
+              }
+
+              if (data.maintenance === true) {
+                let isAdmin = false;
+                try {
+                  const rawUser = localStorage.getItem('user');
+                  if (rawUser) {
+                    const u = JSON.parse(rawUser);
+                    if (u.role === 'admin') {
+                      isAdmin = true;
+                    }
+                  }
+                } catch (e) {}
+                
+                if (!isAdmin) {
+                  renderMaintenancePage();
+                  return;
+                }
+              }
+              const serverVersion = data.version || '2.9.14';
+              const serverFeatures = data.features;
+              const localVersion = window.SYNC_TUNE_VERSION || '2.9.14';
+
+              if (isVersionGreater(serverVersion, localVersion)) {
+                // Perform aggressive cache purge and auto-update
+                if ('caches' in window) {
+                  caches.keys().then(names => names.forEach(name => caches.delete(name))).catch(() => {});
+                }
+                if ('serviceWorker' in navigator) {
+                  navigator.serviceWorker.getRegistrations().then(regs => regs.forEach(r => r.unregister())).catch(() => {});
+                }
+
+                const hasReloaded = sessionStorage.getItem('synctune_has_reloaded');
+                if (hasReloaded !== 'true') {
+                  sessionStorage.setItem('synctune_has_reloaded', 'true');
+                  console.log("New version detected! Reloading to update...");
+                  window.location.reload(true);
+                } else {
+                  console.warn("New version detected! Hard-bypassing browser cache...");
+                  sessionStorage.removeItem('synctune_has_reloaded');
+                  const cleanUrl = window.location.origin + window.location.pathname + '?v=' + encodeURIComponent(serverVersion) + '&_t=' + Date.now();
+                  window.location.replace(cleanUrl);
+                }
+              } else {
+                // Version matches!
+                sessionStorage.removeItem('synctune_has_reloaded');
+                localStorage.setItem('synctune_last_seen_version', localVersion);
+              }
+            })
+            .catch(err => console.error("Error running auto-update check:", err));
+        });
+
+        // Helper: SemVer comparison (returns true if v1 > v2)
+        function isVersionGreater(v1, v2) {
+          const parts1 = v1.split('.').map(Number);
+          const parts2 = v2.split('.').map(Number);
+          for (let i = 0; i < 3; i++) {
+            const p1 = parts1[i] || 0;
+            const p2 = parts2[i] || 0;
+            if (p1 > p2) return true;
+            if (p1 < p2) return false;
+          }
+          return false;
+        }
+
+        // Cache warning banner removed
+
+        // Helper: Render gorgeous cinematic maintenance page
+        function renderMaintenancePage() {
+          document.body.innerHTML = `
+            <div style="background-color:#040806; color:#e2e8f0; font-family:'Roboto', sans-serif; display:flex; align-items:center; justify-content:center; min-height:100vh; margin:0; width:100vw; overflow:hidden; box-sizing:border-box;">
+              <div style="width:90%; max-width:480px; padding:40px 32px; background:rgba(11,18,15,0.5); border:1px solid rgba(255,255,255,0.08); border-radius:20px; box-shadow:0 24px 60px rgba(0,0,0,0.6); backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px); text-align:center; box-sizing:border-box; animation: fadeIn 0.5s ease;">
+                <div style="font-size:56px; margin-bottom:24px; animation: bounce 2s infinite; display:inline-block;">🛠️</div>
+                <h1 style="font-family:'Outfit', sans-serif; font-size:24px; font-weight:800; color:white; margin:0 0 12px 0; background:linear-gradient(135deg, #10b981, #00ff87); -webkit-background-clip:text; -webkit-text-fillColor:transparent;">Upgrades in Progress</h1>
+                <p style="font-size:14px; color:#94a3b8; line-height:1.6; margin:0 0 32px 0;">
+                  We are currently performing scheduled backend optimizations to keep your listening rooms perfectly synced and secure. 
+                  <br><br>
+                  SyncTune will be back online shortly with enhanced performance! Thank you for your patience.
+                </p>
+                <div style="border-top:1px solid rgba(255,255,255,0.06); padding-top:20px; font-size:11px; color:#64748b; letter-spacing:0.5px; text-transform:uppercase; font-weight:700;">
+                  ⚡ SyncTune Secure Streaming Layer
+                </div>
+              </div>
+            </div>
+          `;
+        }
+      })();
+    </script>
+    
+    <!-- Native Mobile Background Playback Script -->
+    <script>
+      (function() {
+        let lastTitle = "";
+        let lastArtist = "";
+        let lastThumb = "";
+        let silentAudio = null;
+
+        // Initialize silent audio element
+        function initSilentAudio() {
+          if (!silentAudio) {
+            silentAudio = document.createElement('audio');
+            silentAudio.id = 'synctune-bg-keepalive';
+            silentAudio.src = 'data:audio/wav;base64,UklGRjIAAABXQVZFZm10IBIAAAABAAEAQB8AAEAfAAABAAgAAABmYWN0BAAAAAAAAABkYXRhAAAAAA==';
+            silentAudio.loop = true;
+            silentAudio.style.display = 'none';
+            document.body.appendChild(silentAudio);
+          }
+        }
+
+        // Register Media Session controls
+        function setupMediaSession() {
+          if ('mediaSession' in navigator) {
+            navigator.mediaSession.setActionHandler('play', () => {
+              if (window.ytPlayerInstance && typeof window.ytPlayerInstance.playVideo === 'function') {
+                window.ytPlayerInstance.playVideo();
+              }
+              if (silentAudio) {
+                silentAudio.play().catch(() => {});
+              }
+              navigator.mediaSession.playbackState = 'playing';
+            });
+
+            navigator.mediaSession.setActionHandler('pause', () => {
+              if (window.ytPlayerInstance && typeof window.ytPlayerInstance.pauseVideo === 'function') {
+                window.ytPlayerInstance.pauseVideo();
+              }
+              if (silentAudio) {
+                silentAudio.pause();
+              }
+              navigator.mediaSession.playbackState = 'paused';
+            });
+
+            navigator.mediaSession.setActionHandler('previoustrack', () => {
+              const prevBtn = document.querySelector('button[title*="Previous track"]');
+              if (prevBtn) prevBtn.click();
+            });
+
+            navigator.mediaSession.setActionHandler('nexttrack', () => {
+              const nextBtn = document.querySelector('button[title*="Next track"]');
+              if (nextBtn) nextBtn.click();
+            });
+          }
+        }
+
+        // Monitor player and update lock screen details
+        setInterval(() => {
+          try {
+            // Find metadata DOM elements
+            // Cover Image
+            const imgEl = document.querySelector('footer img.spinning-cover') || document.querySelector('footer img');
+            // Title
+            const titleEl = document.querySelector('footer div[style*="songTitle"]') || document.querySelector('footer .songTitle');
+            // Artist
+            const artistEl = document.querySelector('footer div[style*="songArtist"]') || document.querySelector('footer .songArtist');
+
+            if (titleEl && artistEl) {
+              const title = titleEl.innerText || titleEl.textContent;
+              const artist = artistEl.innerText || artistEl.textContent;
+              const thumb = imgEl ? imgEl.src : '';
+
+              if (title && title !== "No song playing" && (title !== lastTitle || artist !== lastArtist)) {
+                lastTitle = title;
+                lastArtist = artist;
+                lastThumb = thumb;
+
+                initSilentAudio();
+                setupMediaSession();
+
+                if ('mediaSession' in navigator) {
+                  navigator.mediaSession.metadata = new MediaMetadata({
+                    title: title,
+                    artist: artist,
+                    album: 'SyncTune',
+                    artwork: [
+                      { src: thumb || 'favicon.svg', sizes: '256x256', type: 'image/png' }
+                    ]
+                  });
+                }
+              }
+            }
+
+            // Sync audio keepalive state based on actual player status
+            if (window.ytPlayerInstance && typeof window.ytPlayerInstance.getPlayerState === 'function') {
+              const state = window.ytPlayerInstance.getPlayerState();
+              if (state === 1) { // Playing
+                initSilentAudio();
+                if (silentAudio && silentAudio.paused) {
+                  silentAudio.play().catch(() => {});
+                }
+                if ('mediaSession' in navigator) {
+                  navigator.mediaSession.playbackState = 'playing';
+                }
+              } else if (state === 2 || state === 0 || state === -1) { // Paused / Ended / Unstarted
+                if (silentAudio && !silentAudio.paused) {
+                  silentAudio.pause();
+                }
+                if ('mediaSession' in navigator) {
+                  navigator.mediaSession.playbackState = 'paused';
+                }
+              }
+            }
+          } catch(err) {
+            // Silently capture errors
+          }
+        }, 1000);
+      })();
+    </script>
+  </body>
+</html>

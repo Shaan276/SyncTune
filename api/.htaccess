@@ -1,0 +1,10 @@
+# SyncTune API Directory Apache Configuration
+# Passes Authorization headers securely to PHP on shared hosting (like InfinityFree)
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    
+    # Pass Authorization Header to PHP environment securely for API files
+    RewriteCond %{HTTP:Authorization} .
+    RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+</IfModule>

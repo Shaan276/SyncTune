@@ -1,0 +1,1324 @@
+/* ==========================================
+   SyncTune Premium Glass-Neumorphic Redesign
+   (High-Performance, GPU-Optimized Version)
+   ========================================== */
+
+:root {
+  --bg-primary: #040806;        /* Sleek deep forest black background */
+  --bg-secondary: #0b120f;      /* Card / Sidebar surface background */
+  --bg-tertiary: #121e19;       /* Raised element background */
+  
+  /* Soft Shadows (with subtle green tone tint) */
+  --neu-extruded-sm: 4px 4px 10px rgba(0,0,0,0.5), -4px -4px 10px rgba(16,185,129,0.01);
+  --neu-inset: inset 3px 3px 8px rgba(0,0,0,0.5), inset -3px -3px 8px rgba(16,185,129,0.005);
+  --card-shadow: 0 8px 24px rgba(0, 0, 0, 0.4), 0 0 15px rgba(16, 185, 129, 0.02);
+  
+  /* Glassmorphism Details */
+  --glass-bg: rgba(11, 18, 15, 0.75);
+  --glass-border: rgba(16, 185, 129, 0.08);
+  --glass-blur: 14px;
+  
+  /* Text and Accents */
+  --text-primary: #f8fafc;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --accent-cyan: #10b981;       /* Premium Emerald Green accent */
+  --accent-purple: #00ff87;     /* Vibrant Neon Green/Lime accent */
+  --accent-gradient: linear-gradient(135deg, #10b981, #00ff87);
+  
+  /* Radii */
+  --radius-sm: 10px;
+  --radius-md: 16px;
+  --radius-lg: 24px;
+}
+
+body {
+  background: var(--bg-primary) !important;
+  color: var(--text-primary) !important;
+  font-family: 'Outfit', 'Inter', sans-serif !important;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+/* Sidebar navigation - Spotify inspired layout with Glassmorphism */
+aside {
+  background: var(--glass-bg) !important;
+  backdrop-filter: blur(var(--glass-blur)) !important;
+  -webkit-backdrop-filter: blur(var(--glass-blur)) !important;
+  border-right: 1px solid var(--glass-border) !important;
+  border-radius: 0 !important;
+  box-shadow: var(--card-shadow) !important;
+  z-index: 100 !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+aside nav {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 8px !important;
+}
+
+/* Sidebar Nav Item Styling - Clean lift on hover, inset when active */
+aside nav > div, aside button, aside .slide-toggle-item {
+  border-radius: var(--radius-sm) !important;
+  padding: 12px 16px !important;
+  color: var(--text-secondary) !important;
+  cursor: pointer !important;
+  font-weight: 500 !important;
+  border: 1px solid transparent !important;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  background: transparent !important;
+}
+
+aside nav > div:hover, aside button:hover {
+  background: rgba(255, 255, 255, 0.04) !important;
+  color: var(--text-primary) !important;
+  transform: translateX(4px) !important;
+}
+
+aside nav > div[style*="font-weight: 600"],
+aside nav > div.active,
+aside .slide-toggle-item.active {
+  background: rgba(16, 185, 129, 0.1) !important;
+  border: 1px solid rgba(16, 185, 129, 0.15) !important;
+  color: var(--text-primary) !important;
+  font-weight: 600 !important;
+  transform: none !important;
+}
+
+/* Main Content Area */
+main {
+  background: var(--bg-primary) !important;
+}
+
+/* Bento Grid Dashboard Layout */
+.grid {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)) !important;
+  gap: 24px !important;
+  padding: 8px 0 !important;
+}
+
+/* Glass-Neumorphic Cards (Bento Elements) - Optimised (No backdrop blur for solid background cards to prevent GPU lag) */
+.glass-card, .glass-panel {
+  background: var(--bg-secondary) !important;
+  border: 1px solid var(--glass-border) !important;
+  border-radius: var(--radius-md) !important;
+  box-shadow: var(--card-shadow) !important;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  position: relative !important;
+  overflow: hidden !important;
+}
+
+.glass-card:hover {
+  transform: translateY(-3px) !important;
+  border-color: rgba(16, 185, 129, 0.25) !important;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45), 0 0 15px rgba(16, 185, 129, 0.08) !important;
+}
+
+/* Settings Menu Dropdown - position absolute floating dropdown */
+.settings-menu {
+  position: absolute !important;
+  top: 54px !important;
+  right: 0 !important;
+  width: 280px !important;
+  background: var(--bg-secondary) !important;
+  border: 1px solid var(--glass-border) !important;
+  border-radius: var(--radius-md) !important;
+  box-shadow: var(--neu-extruded-sm) !important;
+  z-index: 1000 !important;
+}
+
+/* Album / Playlist Artwork */
+.glass-card img, .song-card img {
+  border-radius: var(--radius-md) !important;
+  object-fit: cover !important;
+  transition: transform 0.25s ease !important;
+}
+
+.glass-card:hover img {
+  transform: scale(1.015) !important;
+}
+
+/* Premium Buttons */
+.btn-primary, .invite-btn {
+  background: var(--accent-gradient) !important;
+  border-radius: var(--radius-md) !important;
+  font-weight: 600 !important;
+  padding: 10px 24px !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.2) !important;
+  color: white !important;
+  cursor: pointer !important;
+  transition: all 0.2s ease !important;
+}
+
+.btn-primary:hover, .invite-btn:hover {
+  transform: translateY(-1px) !important;
+  box-shadow: 0 6px 18px rgba(16, 185, 129, 0.35) !important;
+  filter: brightness(1.05) !important;
+}
+
+.btn-primary:active, .invite-btn:active {
+  transform: translateY(1px) !important;
+  box-shadow: var(--neu-inset) !important;
+}
+
+.btn-secondary {
+  background: rgba(255, 255, 255, 0.04) !important;
+  border: 1px solid var(--glass-border) !important;
+  border-radius: var(--radius-md) !important;
+  color: var(--text-primary) !important;
+  font-weight: 500 !important;
+  transition: all 0.2s ease !important;
+}
+
+.btn-secondary:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+}
+
+.btn-secondary:active {
+  transform: translateY(1px) !important;
+  box-shadow: var(--neu-inset) !important;
+}
+
+/* Sunken Input Fields (No aggressive !important to respect React inline designs) */
+.room-right-panel input[type="text"],
+input[type="text"],
+input[type="password"],
+input[type="email"],
+textarea,
+select {
+  background: rgba(10, 11, 16, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  box-shadow: var(--neu-inset);
+  transition: all 0.2s ease;
+}
+
+.room-right-panel input[type="text"]:focus,
+input[type="text"]:focus,
+input[type="password"]:focus,
+input[type="email"]:focus,
+textarea:focus {
+  border-color: rgba(16, 185, 129, 0.4);
+  box-shadow: var(--neu-inset), 0 0 8px rgba(16, 185, 129, 0.15);
+  outline: none;
+}
+
+/* Explicit overrides for inputs nested in custom capsules to solve distortion */
+div.border-glow-purple input,
+div.border-glow-cyan input,
+div[class*="border-glow"] input,
+.search-container input,
+.search-box input,
+.chat-form input,
+form input[style*="background: none"],
+div[style*="searchContainer"] input,
+div[style*="searchInput"] input,
+div[style*="searchBox"] input,
+body.light-mode div.border-glow-purple input,
+body.light-mode div.border-glow-cyan input,
+body.light-mode div[class*="border-glow"] input,
+body.light-mode .search-container input,
+body.light-mode .search-box input,
+body.light-mode .chat-form input,
+body.light-mode form input[style*="background: none"],
+body.light-mode div[style*="searchContainer"] input,
+body.light-mode div[style*="searchInput"] input,
+body.light-mode div[style*="searchBox"] input {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  outline: none !important;
+}
+
+/* Glassmorphic Playback Bar */
+footer.glass-panel {
+  position: fixed !important;
+  bottom: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  background: var(--glass-bg) !important;
+  backdrop-filter: blur(var(--glass-blur)) !important;
+  -webkit-backdrop-filter: blur(var(--glass-blur)) !important;
+  border-top: 1px solid var(--glass-border) !important;
+  box-shadow: var(--card-shadow) !important;
+  z-index: 1000 !important;
+  box-sizing: border-box !important;
+}
+
+@media (min-width: 1025px) {
+  footer.glass-panel {
+    position: fixed !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    width: 100vw !important;
+    border-radius: 0 !important;
+    border-left: none !important;
+    border-right: none !important;
+    border-bottom: none !important;
+    margin: 0 !important;
+  }
+}
+
+/* Seek Slider range styling */
+footer input[type="range"], .cinema-slider {
+  -webkit-appearance: none !important;
+  appearance: none !important;
+  background: rgba(10, 11, 16, 0.8) !important;
+  box-shadow: var(--neu-inset) !important;
+  height: 6px !important;
+  border-radius: 3px !important;
+  outline: none !important;
+}
+
+footer input[type="range"]::-webkit-slider-thumb,
+.cinema-slider::-webkit-slider-thumb {
+  -webkit-appearance: none !important;
+  appearance: none !important;
+  width: 14px !important;
+  height: 14px !important;
+  border-radius: 50% !important;
+  background: var(--text-primary) !important;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.4) !important;
+  cursor: pointer !important;
+}
+
+/* Room Layout (Group Listening Panel) styling */
+.room-layout-container,
+.room-left-panel,
+.room-right-panel {
+    box-sizing: border-box !important;
+}
+
+.room-layout-container {
+    display: flex;
+    gap: 24px;
+    height: 100% !important;
+    overflow: hidden;
+}
+
+.room-left-panel {
+    flex: 1.2 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 20px !important;
+    height: 100% !important;
+    overflow-y: auto !important;
+    padding-right: 6px !important;
+}
+
+.room-left-panel > div,
+.room-left-panel > .glass-panel {
+    flex-shrink: 0 !important;
+}
+
+.room-music-finder {
+    min-height: 380px !important;
+}
+
+.room-right-panel {
+    flex: 0.8 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    height: 100% !important;
+    max-height: 100% !important;
+    padding: 16px !important;
+    overflow: hidden !important;
+    background: var(--bg-secondary) !important;
+    border: 1px solid var(--glass-border) !important;
+    border-radius: var(--radius-md) !important;
+    box-shadow: var(--card-shadow) !important;
+}
+
+/* Force chat messages area to take up all remaining space and scroll */
+.room-right-panel > div:nth-child(2) {
+    flex: 1 !important;
+    overflow-y: auto !important;
+    min-height: 0 !important;
+    margin-bottom: 12px !important;
+    padding-right: 8px !important;
+}
+
+/* Style the chat form to stay firmly at the bottom */
+.room-right-panel > form {
+    margin-top: auto !important;
+    flex-shrink: 0 !important;
+}
+
+/* Scrollbars styling */
+::-webkit-scrollbar {
+  width: 6px !important;
+  height: 6px !important;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent !important;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border-radius: 10px !important;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(16, 185, 129, 0.25) !important;
+}
+
+/* Custom text and border glow utilities */
+.text-glow-purple {
+  text-shadow: 0 0 12px rgba(16, 185, 129, 0.4) !important;
+}
+.text-glow-cyan {
+  text-shadow: 0 0 12px rgba(0, 255, 135, 0.4) !important;
+}
+.border-glow-purple:focus-within {
+  border-color: rgba(16, 185, 129, 0.6) !important;
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.2) !important;
+}
+.border-glow-cyan:focus-within {
+  border-color: rgba(0, 255, 135, 0.6) !important;
+  box-shadow: 0 0 12px rgba(0, 255, 135, 0.2) !important;
+}
+
+.custom-select-option.selected {
+  background: rgba(16, 185, 129, 0.15) !important;
+  color: #00ff87 !important;
+}
+
+/* Beautiful slide-indicator */
+.slide-indicator {
+  background: var(--accent-gradient) !important;
+}
+
+/* ==========================================
+   Original YouTube Player & Toast Elements
+   ========================================== */
+
+/* YouTube Player Container - Kept off-screen by default to allow API initialization and audio playback */
+#yt-player-container {
+    position: fixed !important;
+    left: -9999px !important;
+    top: -9999px !important;
+    width: 200px !important;
+    height: 200px !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+    z-index: -9999 !important;
+    overflow: hidden !important;
+    background: #000 !important;
+}
+
+#yt-player-container iframe,
+#yt-player-container #yt-iframe-placeholder {
+    width: 100% !important;
+    height: 100% !important;
+    border: none !important;
+    display: block !important;
+    position: relative !important;
+    left: 0 !important;
+    top: 0 !important;
+}
+
+/* Remove backdrop filters on youtube container to prevent video lagging */
+#yt-player-container, #yt-player-container * {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    box-shadow: none !important;
+}
+
+.toast {
+    position: fixed;
+    bottom: 100px;
+    right: 30px;
+    background: rgba(0,0,0,0.8);
+    color: #fff;
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    z-index: 1100;
+}
+.toast.show { opacity: 1; }
+
+/* Responsive Media Queries */
+@media (max-width: 992px) {
+    .room-layout-container {
+        flex-direction: column;
+        overflow-y: auto !important;
+        height: auto !important;
+        padding-bottom: 40px;
+    }
+    .room-left-panel, .room-right-panel {
+        flex: 1 !important;
+        height: auto !important;
+        max-height: none !important;
+        overflow-y: visible !important;
+    }
+    .room-right-panel {
+        min-height: 400px;
+    }
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+@keyframes scaleUp {
+    from { transform: scale(0.95); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+}
+
+/* Premium Play Overlay Hover Effect */
+.glass-card:hover .play-overlay {
+    opacity: 1 !important;
+}
+
+/* Responsive styling for the floating Room Chat Overlay on mobile screens */
+@media (max-width: 768px) {
+    .chat-box-overlay {
+        width: calc(100% - 32px) !important;
+        right: 16px !important;
+        left: 16px !important;
+        top: 76px !important;
+        height: calc(100vh - 180px) !important;
+        max-height: 420px !important;
+        border-radius: 12px !important;
+        box-shadow: 0 12px 40px rgba(0,0,0,0.6) !important;
+        display: flex !important;
+        flex-direction: column !important;
+        overflow: hidden !important;
+    }
+}
+
+/* ==========================================
+   Floating Theme Toggle Button Styles
+   ========================================== */
+#theme-toggle-btn {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(10, 15, 30, 0.8);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  z-index: 9999;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+#theme-toggle-btn:hover {
+  transform: translateY(-2px) rotate(15deg) scale(1.05) !important;
+  box-shadow: 0 10px 25px rgba(168, 85, 247, 0.3) !important;
+  border-color: rgba(168, 85, 247, 0.4) !important;
+}
+
+/* Global Transition Smoothness */
+body, aside, main, footer, .glass-card, .glass-panel, input, button, span, div, h1, h2, h3, h4, p, label, tr {
+  transition: background-color 0.3s ease, border-color 0.3s ease, color 0.2s ease, box-shadow 0.3s ease, transform 0.25s ease !important;
+}
+
+/* ==========================================
+   Light Mode Theme Variables & Overrides
+   ========================================== */
+body.light-mode, html.light-mode {
+  --bg-primary: #f5f7fa;        /* Soft premium light gray */
+  --bg-secondary: #ffffff;      /* Clean card and sidebar panels */
+  --bg-tertiary: #edf2f7;       /* Light border/hover highlights */
+  
+  --glass-bg: rgba(255, 255, 255, 0.8);
+  --glass-border: rgba(0, 0, 0, 0.08);
+  --glass-blur: 16px;
+  
+  --text-primary: #1a202c;      /* Deep slate gray for primary text */
+  --text-secondary: #4a5568;    /* Medium slate for details */
+  --text-muted: #718096;        /* Light gray for low-priority details */
+  
+  --card-shadow: 0 10px 30px rgba(0, 0, 0, 0.04), 0 2px 8px rgba(0, 0, 0, 0.02);
+  --neu-extruded-sm: 4px 4px 12px rgba(0, 0, 0, 0.05), -4px -4px 12px rgba(255, 255, 255, 0.8);
+  --neu-inset: inset 2px 2px 6px rgba(0, 0, 0, 0.04), inset -2px -2px 6px rgba(255, 255, 255, 0.8);
+}
+
+/* Light Mode Overrides for Hardcoded Inline Color Styles */
+body.light-mode #theme-toggle-btn {
+  border-color: rgba(0, 0, 0, 0.08);
+  background: rgba(255, 255, 255, 0.8);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
+}
+
+body.light-mode #theme-toggle-btn:hover {
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1) !important;
+  border-color: rgba(0, 0, 0, 0.15) !important;
+}
+
+/* Sidebar Specific Overrides */
+body.light-mode aside {
+  background: var(--bg-secondary) !important;
+  border-right-color: var(--glass-border) !important;
+}
+body.light-mode aside nav > div span,
+body.light-mode aside .slide-toggle-item span {
+  color: var(--text-secondary) !important;
+}
+body.light-mode aside nav > div:hover span,
+body.light-mode aside .slide-toggle-item:hover span {
+  color: var(--text-primary) !important;
+}
+body.light-mode aside nav > div.active span,
+body.light-mode aside nav > div[style*="font-weight: 600"] span,
+body.light-mode aside .slide-toggle-item.active span {
+  color: var(--text-primary) !important;
+}
+body.light-mode aside .brand span[style*="color: white"] {
+  color: var(--text-primary) !important;
+}
+
+/* Main Content Overrides */
+body.light-mode main {
+  background-color: var(--bg-primary) !important;
+}
+body.light-mode h2, body.light-mode h3, body.light-mode h4, body.light-mode h5, body.light-mode h6 {
+  color: var(--text-primary) !important;
+}
+body.light-mode p, body.light-mode label {
+  color: var(--text-secondary) !important;
+}
+
+/* Table and Song Row List overrides */
+body.light-mode div[style*="border-top: 1px solid rgba(255, 255, 255"],
+body.light-mode div[style*="border-bottom: 1px solid rgba(255, 255, 255"] {
+  border-color: var(--glass-border) !important;
+}
+body.light-mode .song-row:hover {
+  background: rgba(0, 0, 0, 0.03) !important;
+}
+
+/* Search cards / recommendation list items */
+body.light-mode div[style*="background: rgba(255, 255, 255, 0.02)"],
+body.light-mode div[style*="background:rgba(255, 255, 255, 0.02)"],
+body.light-mode div[style*="background: rgba(168, 85, 247, 0.05)"] {
+  background: var(--bg-secondary) !important;
+  border-color: var(--glass-border) !important;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.02) !important;
+}
+body.light-mode div[style*="background: rgba(255, 255, 255, 0.02)"]:hover,
+body.light-mode div[style*="background:rgba(255, 255, 255, 0.02)"]:hover,
+body.light-mode div[style*="background: rgba(168, 85, 247, 0.05)"]:hover {
+  background: var(--bg-tertiary) !important;
+}
+
+/* Inline white texts -> dark texts */
+body.light-mode span[style*="color: white"],
+body.light-mode div[style*="color: white"],
+body.light-mode h1[style*="color: white"],
+body.light-mode h2[style*="color: white"],
+body.light-mode h3[style*="color: white"],
+body.light-mode h4[style*="color: white"],
+body.light-mode p[style*="color: white"] {
+  color: var(--text-primary) !important;
+}
+body.light-mode span[style*="color: rgba(255, 255, 255"],
+body.light-mode div[style*="color: rgba(255, 255, 255"],
+body.light-mode p[style*="color: rgba(255, 255, 255"] {
+  color: var(--text-secondary) !important;
+}
+
+/* Inputs and Forms */
+body.light-mode input[type="text"],
+body.light-mode input[type="email"],
+body.light-mode input[type="password"],
+body.light-mode textarea,
+body.light-mode select {
+  background: var(--bg-secondary) !important;
+  border-color: var(--glass-border) !important;
+  color: var(--text-primary) !important;
+  box-shadow: inset 1px 1px 4px rgba(0,0,0,0.05) !important;
+}
+body.light-mode input::placeholder {
+  color: var(--text-muted) !important;
+}
+
+/* Custom Playback Bar (Footer) */
+body.light-mode footer.glass-panel {
+  background: var(--bg-secondary) !important;
+  border-top: 1px solid var(--glass-border) !important;
+  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.03) !important;
+}
+body.light-mode footer.glass-panel span[style*="color: white"],
+body.light-mode footer.glass-panel div[style*="color: white"] {
+  color: var(--text-primary) !important;
+}
+body.light-mode footer.glass-panel span[style*="color: rgba(255, 255, 255"],
+body.light-mode footer.glass-panel div[style*="color: rgba(255, 255, 255"] {
+  color: var(--text-secondary) !important;
+}
+body.light-mode footer.glass-panel input[type="range"] {
+  background: var(--bg-tertiary) !important;
+}
+
+/* Room chat panel and specific room elements */
+body.light-mode .room-right-panel {
+  background: var(--bg-secondary) !important;
+  border-color: var(--glass-border) !important;
+}
+body.light-mode .room-right-panel span[style*="color: white"],
+body.light-mode .room-right-panel div[style*="color: white"] {
+  color: var(--text-primary) !important;
+}
+body.light-mode .room-right-panel div[style*="background: rgba(0, 0, 0, 0.2)"] {
+  background: var(--bg-primary) !important;
+  border: 1px solid var(--glass-border) !important;
+}
+
+/* Modals and Overlays */
+body.light-mode #synctune-cinema-wrapper {
+  background: var(--bg-secondary) !important;
+  border-color: var(--glass-border) !important;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.15) !important;
+}
+body.light-mode #synctune-cinema-header span[style*="color: white"] {
+  color: var(--text-primary) !important;
+}
+body.light-mode #custom-alert-overlay {
+  background: rgba(255, 255, 255, 0.7) !important;
+}
+body.light-mode #custom-alert-overlay .glass-panel {
+  background: var(--bg-secondary) !important;
+  border-color: var(--glass-border) !important;
+  box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1) !important;
+}
+body.light-mode #custom-alert-message {
+  color: var(--text-primary) !important;
+}
+
+/* Custom glow transitions */
+body.light-mode .text-glow-purple {
+  text-shadow: 0 0 8px rgba(139, 92, 246, 0.15) !important;
+  color: var(--accent-purple) !important;
+}
+body.light-mode .text-glow-cyan {
+  text-shadow: 0 0 8px rgba(14, 165, 233, 0.15) !important;
+  color: var(--accent-cyan) !important;
+}
+
+/* Buttons */
+body.light-mode .btn-secondary {
+  background: var(--bg-tertiary) !important;
+  border-color: var(--glass-border) !important;
+  color: var(--text-primary) !important;
+}
+body.light-mode .btn-secondary:hover {
+  background: #e2e8f0 !important;
+}
+
+/* Scrollbars for light mode */
+body.light-mode ::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.1) !important;
+}
+body.light-mode ::-webkit-scrollbar-thumb:hover {
+  background: rgba(139, 92, 246, 0.3) !important;
+}
+
+/* Floating Theme Toggle Button */
+#theme-toggle-btn {
+  position: fixed !important;
+  top: 24px !important;
+  bottom: auto !important;
+  right: 24px !important;
+  width: 48px !important;
+  height: 48px !important;
+  border-radius: 50% !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  background: rgba(15, 23, 42, 0.8) !important;
+  color: #f1f5f9 !important;
+  backdrop-filter: blur(16px) !important;
+  -webkit-backdrop-filter: blur(16px) !important;
+  cursor: pointer !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  font-size: 20px !important;
+  z-index: 999999999 !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
+  transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) !important;
+}
+
+#theme-toggle-btn:hover {
+  transform: scale(1.1) rotate(12deg) !important;
+  border-color: rgba(168, 85, 247, 0.4) !important;
+  box-shadow: 0 12px 40px rgba(168, 85, 247, 0.25) !important;
+}
+
+#theme-toggle-btn:active {
+  transform: scale(0.95) !important;
+}
+
+body.light-mode #theme-toggle-btn {
+  background: rgba(255, 255, 255, 0.8) !important;
+  border-color: rgba(0, 0, 0, 0.08) !important;
+  color: #0f172a !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.8) !important;
+}
+
+body.light-mode #theme-toggle-btn:hover {
+  border-color: rgba(14, 165, 233, 0.3) !important;
+  box-shadow: 0 12px 40px rgba(14, 165, 233, 0.15) !important;
+}
+
+/* YouTube Search Results Dropdown & Items inside Cinema Search */
+.youtube-search-result-item {
+  display: flex !important;
+  align-items: center !important;
+  padding: 8px 12px !important;
+  gap: 12px !important;
+  background: rgba(255, 255, 255, 0.02) !important;
+  border-radius: 8px !important;
+  border: 1px solid rgba(255, 255, 255, 0.04) !important;
+  cursor: pointer !important;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  flex-shrink: 0 !important;
+  min-height: 54px !important;
+  height: 54px !important;
+  box-sizing: border-box !important;
+}
+
+.youtube-search-result-item:hover {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border-color: rgba(168, 85, 247, 0.3) !important;
+  transform: translateY(-1px) !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2) !important;
+}
+
+.youtube-search-result-item img {
+  width: 48px !important;
+  height: 36px !important;
+  border-radius: 4px !important;
+  object-fit: cover !important;
+  flex-shrink: 0 !important;
+}
+
+.youtube-search-result-item div {
+  flex: 1 !important;
+  min-width: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 2px !important;
+  justify-content: center !important;
+}
+
+.youtube-search-result-item span {
+  font-family: 'Inter', sans-serif !important;
+}
+
+/* Light Mode specific search result items */
+body.light-mode .youtube-search-result-item {
+  background: rgba(0, 0, 0, 0.02) !important;
+  border-color: rgba(0, 0, 0, 0.05) !important;
+}
+
+body.light-mode .youtube-search-result-item:hover {
+  background: rgba(0, 0, 0, 0.04) !important;
+  border-color: rgba(14, 165, 233, 0.3) !important;
+}
+
+body.light-mode .youtube-search-result-item span {
+  color: var(--text-primary) !important;
+}
+
+body.light-mode .youtube-search-result-item span[style*="rgba(255, 255, 255, 0.4)"] {
+  color: var(--text-secondary) !important;
+}
+
+/* Login and main background container override for Light Mode */
+body.light-mode div[style*="background: hsl(240 16% 4%)"],
+body.light-mode div[style*="background:hsl(240 16% 4%)"] {
+  background: var(--bg-primary) !important;
+}
+
+/* Hide scrollbar utility */
+.hide-scrollbar::-webkit-scrollbar {
+  display: none !important;
+}
+.hide-scrollbar {
+  -ms-overflow-style: none !important;
+  scrollbar-width: none !important;
+}
+
+
+/* ==========================================
+   Mobile Responsive Layout Overrides
+   ========================================== */
+
+@media (max-width: 1024px) {
+  /* Force main content wrapper to fill the parent width completely and ignore sidebar space when closed */
+  main {
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100vw !important;
+    max-width: 100vw !important;
+    height: 100% !important;
+    z-index: 1 !important;
+    margin: 0 !important;
+  }
+
+  /* Make sure the sidebar overlays above the main content */
+  aside {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    bottom: 0 !important;
+    width: 220px !important;
+    height: 100dvh !important;
+    margin: 0 !important;
+    border-radius: 0 !important;
+    transform: translateX(-100%) !important;
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1) !important;
+    z-index: 99999 !important;
+    background: var(--bg-secondary) !important;
+  }
+  
+  .sidebar-open aside {
+    transform: translateX(0) !important;
+  }
+
+  /* Sidebar backdrop overlay dark background & blur */
+  #sidebar-overlay {
+    display: block !important;
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    background: rgba(0, 0, 0, 0.6) !important;
+    backdrop-filter: blur(8px) !important;
+    -webkit-backdrop-filter: blur(8px) !important;
+    z-index: 99998 !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+    transition: opacity 0.3s ease !important;
+  }
+  
+  #sidebar-overlay.active {
+    opacity: 1 !important;
+    pointer-events: auto !important;
+  }
+
+  /* Floating hamburger button sits above the sidebar and overlay */
+  #mobile-hamburger {
+    display: flex !important;
+    position: fixed !important;
+    top: 16px !important;
+    left: 16px !important;
+    z-index: 100000 !important;
+  }
+
+  /* Footer Player Single-Row Mobile Layout - centered using vw/vh responsive properties */
+  footer.glass-panel {
+    position: fixed !important;
+    height: 72px !important;
+    padding: 0 16px !important;
+    bottom: 16px !important; /* Stable pixel height instead of vh to avoid address bar overlaps */
+    left: 50% !important;
+    transform: translateX(-50%) !important;
+    width: 90vw !important;
+    max-width: 480px !important;
+    right: auto !important;
+    margin: 0 auto !important;
+    border-radius: 36px !important;
+    border: 1px solid var(--glass-border) !important;
+    background: rgba(11, 18, 15, 0.95) !important;
+    backdrop-filter: blur(16px) !important;
+    -webkit-backdrop-filter: blur(16px) !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.6) !important;
+    z-index: 1000 !important;
+  }
+  
+  /* Seeker progress bar at the very top of the capsule */
+  footer.glass-panel > div:first-child {
+    position: absolute !important;
+    top: 0 !important;
+    left: 24px !important;
+    right: 24px !important;
+    width: calc(100% - 48px) !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    height: 2px !important;
+  }
+  
+  footer > div:first-child span {
+    display: none !important; /* Hide time labels (current/duration) on mobile to save space */
+  }
+  
+  footer > div:first-child input {
+    position: absolute !important;
+    top: -2px !important;
+    left: 0 !important;
+    width: 100% !important;
+    height: 2px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: rgba(255, 255, 255, 0.1) !important;
+  }
+
+  /* Main Controls Container Row */
+  footer > div:nth-child(2) {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    width: 100% !important;
+    margin-top: 4px !important;
+    gap: 0 !important;
+  }
+
+  /* Song Metadata Panel */
+  footer > div:nth-child(2) > div:first-child {
+    width: auto !important;
+    min-width: 0 !important; /* Override default 220px min-width to avoid squishing controls */
+    flex: 1 !important;
+    display: flex !important;
+    align-items: center !important;
+    margin-right: 12px !important;
+  }
+  
+  footer > div:nth-child(2) > div:first-child > div:first-child {
+    width: 38px !important;
+    height: 38px !important;
+    border-radius: 8px !important;
+    margin-right: 10px !important;
+    flex-shrink: 0 !important;
+    border: 1px solid rgba(255,255,255,0.06) !important;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3) !important;
+  }
+  
+  footer > div:nth-child(2) > div:first-child > div:first-child img {
+    border-radius: 8px !important;
+    width: 100% !important;
+    height: 100% !important;
+    object-fit: cover !important;
+  }
+  
+  footer > div:nth-child(2) > div:first-child > div:nth-child(2) {
+    display: flex !important;
+    flex-direction: column !important;
+    min-width: 0 !important;
+    flex: 1 !important;
+  }
+  
+  footer > div:nth-child(2) > div:first-child > div:nth-child(2) div:first-child {
+    font-size: 13px !important;
+    font-weight: 700 !important;
+    color: white !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    text-align: left !important;
+    max-width: 100% !important;
+  }
+  
+  footer > div:nth-child(2) > div:first-child > div:nth-child(2) div:nth-child(2) {
+    font-size: 11px !important;
+    color: var(--text-secondary) !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    text-align: left !important;
+    max-width: 100% !important;
+  }
+  
+  /* Visualizer - Hide on mobile to save space */
+  footer > div:nth-child(2) > div:first-child > div:nth-child(3) {
+    display: none !important;
+  }
+
+  /* Playback controls (middle section) */
+  footer > div:nth-child(2) > div:nth-child(2) {
+    width: auto !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    margin: 0 !important;
+    flex-shrink: 0 !important;
+  }
+  
+  footer > div:nth-child(2) > div:nth-child(2) > div:first-child {
+    display: flex !important;
+    align-items: center !important;
+    gap: 12px !important;
+  }
+  
+  /* Hide loop, prev, and autoplay toggle on mobile */
+  footer > div:nth-child(2) > div:nth-child(2) > div:first-child > button:nth-child(1), /* Loop */
+  footer > div:nth-child(2) > div:nth-child(2) > div:first-child > button:nth-child(2), /* Prev */
+  footer > div:nth-child(2) > div:nth-child(2) > div:first-child > div /* Autoplay Toggle wrapper */ {
+    display: none !important;
+  }
+  
+  /* Play and Next buttons styling */
+  footer > div:nth-child(2) > div:nth-child(2) .playBtn,
+  footer > div:nth-child(2) > div:nth-child(2) button[style*="playBtn"],
+  footer > div:nth-child(2) > div:nth-child(2) button:nth-child(3) {
+    width: 38px !important;
+    height: 38px !important;
+    background: var(--accent-gradient) !important;
+    box-shadow: 0 4px 10px rgba(16, 185, 129, 0.3) !important;
+    border-radius: 50% !important;
+    border: none !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    flex-shrink: 0 !important;
+  }
+  
+  footer > div:nth-child(2) > div:nth-child(2) button:nth-child(4) {
+    width: 32px !important;
+    height: 32px !important;
+    border-radius: 50% !important;
+    background: none !important;
+    border: none !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    color: white !important;
+    flex-shrink: 0 !important;
+  }
+
+  /* Right section (Sync controls, volume, badges) */
+  footer > div:nth-child(2) > div:nth-child(3) {
+    width: auto !important;
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: flex-end !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border-top: none !important;
+    flex-shrink: 0 !important;
+  }
+  
+  /* Hide volume and sync toggle elements on mobile to preserve single-row layout */
+  footer > div:nth-child(2) > div:nth-child(3) > div, /* volume sliders or sync switches */
+  footer > div:nth-child(2) > div:nth-child(3) span,
+  footer > div:nth-child(2) > div:nth-child(3) .volumeWrapper {
+    display: none !important;
+  }
+
+  /* Like/Heart button styling in footer far-right */
+  footer > div:nth-child(2) > div:nth-child(3) button {
+    display: inline-flex !important;
+    width: 36px !important;
+    height: 36px !important;
+    border-radius: 50% !important;
+    background: rgba(255, 255, 255, 0.04) !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    padding: 0 !important;
+    align-items: center !important;
+    justify-content: center !important;
+    color: white !important;
+    cursor: pointer !important;
+    font-size: 16px !important;
+  }
+}
+
+@media (max-width: 768px) {
+  /* Transform search & recommendations grids (using inline styles) into list layouts */
+  .tracksGrid,
+  div[style*="tracksGrid"],
+  div[style*="grid-template-columns"] {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 10px !important;
+  }
+
+  .tracksGrid .glass-card,
+  div[style*="tracksGrid"] > .glass-card,
+  div[style*="grid-template-columns"] > .glass-card {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    padding: 10px 16px !important;
+    margin: 0 !important;
+    min-height: 62px !important;
+    height: 62px !important;
+    box-sizing: border-box !important;
+    background: var(--bg-secondary) !important;
+    border: 1px solid var(--glass-border) !important;
+    border-radius: 10px !important;
+    position: relative !important;
+    transform: none !important;
+  }
+
+  .tracksGrid .glass-card:hover,
+  div[style*="tracksGrid"] > .glass-card:hover,
+  div[style*="grid-template-columns"] > .glass-card:hover {
+    transform: translateY(-1px) !important;
+    background: rgba(255, 255, 255, 0.02) !important;
+  }
+
+  /* Thumbnail wrapper styling like Recently Listened */
+  .tracksGrid .glass-card > div:nth-child(1),
+  div[style*="tracksGrid"] > .glass-card > div:nth-child(1),
+  div[style*="grid-template-columns"] > .glass-card > div:nth-child(1) {
+    width: 42px !important;
+    height: 42px !important;
+    min-height: 42px !important;
+    margin-right: 16px !important;
+    margin-bottom: 0 !important;
+    border-radius: 6px !important;
+    overflow: hidden !important;
+    flex-shrink: 0 !important;
+    position: relative !important;
+    aspect-ratio: 1/1 !important;
+  }
+
+  .tracksGrid .glass-card > div:nth-child(1) img,
+  div[style*="tracksGrid"] > .glass-card > div:nth-child(1) img,
+  div[style*="grid-template-columns"] > .glass-card > div:nth-child(1) img {
+    width: 100% !important;
+    height: 100% !important;
+    object-fit: cover !important;
+  }
+
+  /* Play overlay over thumbnail for touch support on mobile */
+  .tracksGrid .glass-card > div:nth-child(1) .play-overlay,
+  .tracksGrid .glass-card > div:nth-child(1) > div[style*="playOverlay"],
+  .tracksGrid .glass-card > div:nth-child(1) > div:nth-child(2),
+  div[style*="tracksGrid"] > .glass-card > div:nth-child(1) > div[style*="playOverlay"],
+  div[style*="tracksGrid"] > .glass-card > div:nth-child(1) > div:nth-child(2),
+  div[style*="grid-template-columns"] > .glass-card > div:nth-child(1) > div[style*="playOverlay"],
+  div[style*="grid-template-columns"] > .glass-card > div:nth-child(1) > div:nth-child(2) {
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    background: rgba(0, 0, 0, 0.4) !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    opacity: 0.75 !important;
+    transition: opacity 0.2s ease !important;
+  }
+  
+  .tracksGrid .glass-card > div:nth-child(1) .play-overlay svg,
+  .tracksGrid .glass-card > div:nth-child(1) > div[style*="playOverlay"] svg,
+  .tracksGrid .glass-card > div:nth-child(1) > div:nth-child(2) svg,
+  div[style*="tracksGrid"] > .glass-card > div:nth-child(1) > div[style*="playOverlay"] svg,
+  div[style*="tracksGrid"] > .glass-card > div:nth-child(1) > div:nth-child(2) svg,
+  div[style*="grid-template-columns"] > .glass-card > div:nth-child(1) > div[style*="playOverlay"] svg,
+  div[style*="grid-template-columns"] > .glass-card > div:nth-child(1) > div:nth-child(2) svg {
+    width: 16px !important;
+    height: 16px !important;
+  }
+
+  /* Info column */
+  .tracksGrid .glass-card > div:nth-child(2),
+  div[style*="tracksGrid"] > .glass-card > div:nth-child(2),
+  div[style*="grid-template-columns"] > .glass-card > div:nth-child(2) {
+    flex: 1 !important;
+    min-width: 0 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    margin-right: 12px !important;
+  }
+
+  /* Title */
+  .tracksGrid .glass-card > div:nth-child(2) > div:nth-child(1),
+  div[style*="tracksGrid"] > .glass-card > div:nth-child(2) > div:nth-child(1),
+  div[style*="grid-template-columns"] > .glass-card > div:nth-child(2) > div:nth-child(1) {
+    font-size: 14px !important;
+    font-weight: 600 !important;
+    color: white !important;
+    margin-bottom: 2px !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    width: 100% !important;
+    text-align: left !important;
+  }
+
+  /* Artist */
+  .tracksGrid .glass-card > div:nth-child(2) > div:nth-child(2),
+  div[style*="tracksGrid"] > .glass-card > div:nth-child(2) > div:nth-child(2),
+  div[style*="grid-template-columns"] > .glass-card > div:nth-child(2) > div:nth-child(2) {
+    font-size: 11px !important;
+    color: hsl(240 5% 60%) !important;
+    margin-bottom: 0 !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    width: 100% !important;
+    text-align: left !important;
+  }
+
+  /* Action items column */
+  .tracksGrid .glass-card > div:nth-child(3),
+  div[style*="tracksGrid"] > .glass-card > div:nth-child(3),
+  div[style*="grid-template-columns"] > .glass-card > div:nth-child(3) {
+    margin-top: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 12px !important;
+    flex-shrink: 0 !important;
+  }
+
+  /* Hide duration inside search lists on mobile to save space */
+  .tracksGrid .glass-card > div:nth-child(3) > span,
+  div[style*="tracksGrid"] > .glass-card > div:nth-child(3) > span,
+  div[style*="grid-template-columns"] > .glass-card > div:nth-child(3) > span {
+    display: none !important;
+  }
+
+  .tracksGrid .glass-card > div:nth-child(3) > div,
+  div[style*="tracksGrid"] > .glass-card > div:nth-child(3) > div,
+  div[style*="grid-template-columns"] > .glass-card > div:nth-child(3) > div {
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+  }
+
+  .tracksGrid .glass-card > div:nth-child(3) button,
+  div[style*="tracksGrid"] > .glass-card > div:nth-child(3) button,
+  div[style*="grid-template-columns"] > .glass-card > div:nth-child(3) button {
+    width: 32px !important;
+    height: 32px !important;
+    border-radius: 50% !important;
+    background: rgba(255, 255, 255, 0.03) !important;
+    border: 1px solid rgba(255, 255, 255, 0.05) !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    color: white !important;
+    cursor: pointer !important;
+    transition: all 0.2s ease !important;
+    padding: 0 !important;
+  }
+
+  .tracksGrid .glass-card > div:nth-child(3) button:hover,
+  div[style*="tracksGrid"] > .glass-card > div:nth-child(3) button:hover,
+  div[style*="grid-template-columns"] > .glass-card > div:nth-child(3) button:hover {
+    background: rgba(16, 185, 129, 0.15) !important;
+    border-color: rgba(16, 185, 129, 0.25) !important;
+    color: #00ff87 !important;
+  }
+}
