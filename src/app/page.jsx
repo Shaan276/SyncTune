@@ -6,6 +6,7 @@ import PlayerFooter from '../components/PlayerFooter';
 import CinemaPlayer from '../components/CinemaPlayer';
 import FloatingWatchBtn from '../components/FloatingWatchBtn';
 import LiveReactionOverlay from '../components/LiveReactionOverlay';
+import AuthModal from '../components/AuthModal';
 
 import DashboardView from '../components/views/DashboardView';
 import RoomsView from '../components/views/RoomsView';
@@ -16,12 +17,9 @@ import AdminView from '../components/views/AdminView';
 import { searchYouTube, DEFAULT_POPULAR_SONGS } from '../lib/youtube';
 
 export default function Home() {
-  const [user, setUser] = useState({
-    id: 1,
-    username: 'Piyush',
-    email: 'piyushpilkhwal74@gmail.com',
-    role: 'admin'
-  });
+  const [user, setUser] = useState(null);
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [isClient, setIsClient] = useState(false);
 
   const [activeTab, setActiveTab] = useState('dashboard');
   const [activeRoom, setActiveRoom] = useState(null);
@@ -37,6 +35,22 @@ export default function Home() {
   const [likedSongs, setLikedSongs] = useState([DEFAULT_POPULAR_SONGS[0]]);
   const [searchResults, setSearchResults] = useState([]);
   const [isCinemaOpen, setIsCinemaOpen] = useState(false);
+
+  // Hydrate user session from localStorage
+  useEffect(() => {
+    setIsClient(true);
+    try {
+      const stored = localStorage.getItem('user');
+      if (stored && stored !== 'undefined' && stored !== 'null') {
+        const parsed = JSON.parse(stored);
+        setUser(parsed);
+      } else {
+        setShowAuthModal(true);
+      }
+    } catch (e) {
+      setShowAuthModal(true);
+    }
+  }, []);
 
   // Sync dark/light theme class on document element
   useEffect(() => {
@@ -78,11 +92,23 @@ export default function Home() {
     setIsPlaying(true);
     setCurrentTime(0);
     setDuration(song.duration || 180);
-    setHistory((prev) => [song, ...prev.filter((s) => s.id !== song.id)].slice(0, 50));
+
+    setHistory((prev) => {
+      const filtered = prev.filter((s) => s.id !== song.id);
+      return [song, ...filtered].slice(0, 50); // Cap at 50 songs
+    });
+  };
+
+  const handleTogglePlay = () => {
+    setIsPlaying(!isPlaying);
+  };
+
+  const handleSeek = (newTime) => {
+    setCurrentTime(newTime);
   };
 
   const handleAddToQueue = (song) => {
-    alert(`Added "${song.title}" to queue!`);
+    // Queuing logic
   };
 
   const handleToggleLike = (song) => {
@@ -93,23 +119,21 @@ export default function Home() {
     });
   };
 
-  const handleSkipNext = () => {
-    if (DEFAULT_POPULAR_SONGS.length > 0) {
-      const nextSong = DEFAULT_POPULAR_SONGS[(DEFAULT_POPULAR_SONGS.indexOf(currentSong) + 1) % DEFAULT_POPULAR_SONGS.length];
-      handlePlaySong(nextSong);
-    }
+  const handleLogout = () => {
+    localStorage.removeItem('user');
+    localStorage.removeItem('token');
+    setUser(null);
+    setShowAuthModal(true);
   };
 
-  const handleSkipPrev = () => {
-    if (history.length > 1) {
-      const prevSong = history[1];
-      handlePlaySong(prevSong);
-    }
+  const handleLoginSuccess = (authenticatedUser) => {
+    setUser(authenticatedUser);
+    setShowAuthModal(false);
   };
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground select-none">
-      {/* Sidebar Navigation */}
+    <div className="flex h-screen w-screen overflow-hidden bg-[var(--background)] text-[var(--foreground)]">
+      {/* Sidebar */}
       <Sidebar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
@@ -117,18 +141,21 @@ export default function Home() {
         activeRoom={activeRoom}
         isDarkMode={isDarkMode}
         setIsDarkMode={setIsDarkMode}
+        onOpenAuth={() => setShowAuthModal(true)}
+        onLogout={handleLogout}
       />
 
       {/* Main Content Area */}
-      <main className="flex-1 flex flex-col min-w-0 overflow-y-auto p-4 pr-6">
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <Header
           user={user}
           onSearch={handleSearch}
           activeRoom={activeRoom}
-          onLogout={() => setUser(null)}
+          onLogout={handleLogout}
+          onOpenAuth={() => setShowAuthModal(true)}
         />
 
-        <div className="flex-1 px-2 pt-2">
+        <main className="flex-1 overflow-y-auto px-6 py-2 custom-scrollbar">
           {activeTab === 'dashboard' && (
             <DashboardView
               searchResults={searchResults}
@@ -159,55 +186,61 @@ export default function Home() {
           {activeTab === 'friends' && (
             <FriendsView
               user={user}
-              activeRoom={activeRoom}
               setActiveRoom={setActiveRoom}
+              setActiveTab={setActiveTab}
             />
           )}
 
           {activeTab === 'admin' && (
             <AdminView
               user={user}
+              activeRoom={activeRoom}
               setActiveRoom={setActiveRoom}
             />
           )}
-        </div>
-      </main>
+        </main>
+      </div>
 
-      {/* Watch Together Cinema Player */}
+      {/* Global Bottom Audio Player */}
+      <PlayerFooter
+        currentSong={currentSong}
+        isPlaying={isPlaying}
+        currentTime={currentTime}
+        duration={duration}
+        volume={volume}
+        onTogglePlay={handleTogglePlay}
+        onSeek={handleSeek}
+        onVolumeChange={setVolume}
+        onToggleCinema={() => setIsCinemaOpen(!isCinemaOpen)}
+        isCinemaOpen={isCinemaOpen}
+        likedSongs={likedSongs}
+        onToggleLike={handleToggleLike}
+      />
+
+      {/* Floating Watch Together Cinema Launcher */}
+      <FloatingWatchBtn
+        isOpen={isCinemaOpen}
+        onClick={() => setIsCinemaOpen(!isCinemaOpen)}
+      />
+
+      {/* Cinema Overlay View */}
       <CinemaPlayer
         isOpen={isCinemaOpen}
         onClose={() => setIsCinemaOpen(false)}
         currentSong={currentSong}
-        isRoom={!!activeRoom}
       />
 
-      {/* Floating Cinema Button */}
-      <FloatingWatchBtn
-        onClick={() => setIsCinemaOpen(!isCinemaOpen)}
-        isRoom={!!activeRoom}
-        isOpen={isCinemaOpen}
-      />
+      {/* Real-time Emoji Reaction Overlay */}
+      <LiveReactionOverlay roomCode={activeRoom} />
 
-      {/* Live Room Emoji Reaction Overlay */}
-      <LiveReactionOverlay activeRoom={activeRoom} />
-
-      {/* Audio Player Footer */}
-      <PlayerFooter
-        currentSong={currentSong}
-        isPlaying={isPlaying}
-        onPlayPause={() => setIsPlaying(!isPlaying)}
-        onSkipNext={handleSkipNext}
-        onSkipPrev={handleSkipPrev}
-        currentTime={currentTime}
-        duration={duration}
-        onSeek={(t) => setCurrentTime(t)}
-        volume={volume}
-        onVolumeChange={(v) => setVolume(v)}
-        history={history}
-        likedSongs={likedSongs}
-        onToggleLike={handleToggleLike}
-        onToggleCinema={() => setIsCinemaOpen(!isCinemaOpen)}
-      />
+      {/* Sign In & Create New ID Modal */}
+      {showAuthModal && (
+        <AuthModal
+          onLogin={handleLoginSuccess}
+          onClose={() => setShowAuthModal(false)}
+          allowClose={Boolean(user)}
+        />
+      )}
     </div>
   );
 }

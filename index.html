@@ -79,21 +79,18 @@
         if (theme === 'light') {
           document.documentElement.classList.add('light-mode');
         }
-        // Auto-heal corrupted or missing localStorage session
+        // Clean corrupted localStorage session safely
         try {
           const rawUser = localStorage.getItem('user');
-          const token = localStorage.getItem('token');
-          if (!token || !rawUser || rawUser === 'undefined' || rawUser === 'null') {
-            const defaultUser = { id: 1, username: "Piyush", email: "piyushpilkhwal74@gmail.com", role: "admin" };
-            localStorage.setItem('token', 'synctune-jwt-token-v3');
-            localStorage.setItem('user', JSON.stringify(defaultUser));
-          } else {
+          if (rawUser === 'undefined' || rawUser === 'null') {
+            localStorage.removeItem('user');
+            localStorage.removeItem('token');
+          } else if (rawUser) {
             JSON.parse(rawUser);
           }
         } catch(e) {
-          const defaultUser = { id: 1, username: "Piyush", email: "piyushpilkhwal74@gmail.com", role: "admin" };
-          localStorage.setItem('token', 'synctune-jwt-token-v3');
-          localStorage.setItem('user', JSON.stringify(defaultUser));
+          localStorage.removeItem('user');
+          localStorage.removeItem('token');
         }
       })();
     </script>

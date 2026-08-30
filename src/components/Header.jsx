@@ -1,8 +1,8 @@
 'use client';
 import React, { useState } from 'react';
-import { Search, Sparkles, LogOut, Radio, User } from 'lucide-react';
+import { Search, Sparkles, LogOut, Radio, UserPlus, LogIn } from 'lucide-react';
 
-export default function Header({ user, onSearch, activeRoom, onLogout }) {
+export default function Header({ user, onSearch, activeRoom, onLogout, onOpenAuth }) {
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('music'); // music, artist, mix
 
@@ -70,8 +70,8 @@ export default function Header({ user, onSearch, activeRoom, onLogout }) {
         </div>
       </form>
 
-      {/* Right Controls & Room Status */}
-      <div className="flex items-center gap-4">
+      {/* Right Controls & User ID Status */}
+      <div className="flex items-center gap-3">
         {activeRoom && (
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 text-xs font-bold animate-pulse">
             <Radio className="w-3.5 h-3.5" />
@@ -79,16 +79,31 @@ export default function Header({ user, onSearch, activeRoom, onLogout }) {
           </div>
         )}
 
-        <div className="flex items-center gap-2 glass-panel px-3 py-1.5 rounded-xl">
-          <span className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_#10b981]" />
-          <span className="text-xs font-medium text-white">{user?.username || 'Guest'}</span>
-        </div>
+        {user ? (
+          <div className="flex items-center gap-2 glass-panel px-3 py-1.5 rounded-xl border border-white/10">
+            <span className={`w-2 h-2 rounded-full ${user.role === 'admin' ? 'bg-pink-500 shadow-[0_0_8px_#ec4899]' : 'bg-emerald-500 shadow-[0_0_8px_#10b981]'}`} />
+            <span className="text-xs font-semibold text-white">{user.username}</span>
+            {user.role === 'admin' && (
+              <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-pink-500/20 text-pink-300 border border-pink-500/30">
+                Admin
+              </span>
+            )}
+          </div>
+        ) : (
+          <button
+            onClick={onOpenAuth}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-600/20 border border-purple-500/40 text-purple-300 text-xs font-bold hover:bg-purple-600/30 transition-colors"
+          >
+            <UserPlus className="w-3.5 h-3.5" />
+            <span>Create New ID</span>
+          </button>
+        )}
 
-        {onLogout && (
+        {user && onLogout && (
           <button
             onClick={onLogout}
-            className="p-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 transition-colors"
-            title="Log Out"
+            className="p-2 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 transition-colors"
+            title="Log Out / Switch ID"
           >
             <LogOut className="w-4 h-4" />
           </button>

@@ -196,11 +196,27 @@ const server = http.createServer(async (req, res) => {
 
     // 2. Auth API
     if (pathname.includes('auth')) {
-      const email = body.email || 'piyushpilkhwal74@gmail.com';
-      const username = body.username || email.split('@')[0] || 'Piyush';
+      const email = (body.email || '').trim().toLowerCase();
+      const rawUsername = (body.username || '').trim();
+      const username = rawUsername || (email ? email.split('@')[0] : 'Listener');
+      const isAdmin = email === 'piyushpilkhwal74@gmail.com' || username.toLowerCase() === 'piyush';
+      const role = isAdmin ? 'admin' : 'user';
+
+      const userObj = {
+        id: Date.now(),
+        username,
+        email: email || 'listener@synctune.app',
+        role,
+        status: 'active'
+      };
+
+      if (!memoryStore.users.some(u => u.email === userObj.email)) {
+        memoryStore.users.push({ ...userObj, todayMB: 0, monthMB: 0 });
+      }
+
       return sendJSON({
-        token: 'synctune-jwt-token-v3',
-        user: { id: 1, username, email, role: 'admin' },
+        token: `synctune-jwt-${Date.now()}`,
+        user: userObj,
         status: 'active'
       });
     }
