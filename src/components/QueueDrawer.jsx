@@ -1,6 +1,6 @@
 'use client';
 import React from 'react';
-import { ListMusic, X, Play, Trash2, Sparkles, Music2, ArrowUp, ArrowDown } from 'lucide-react';
+import { ListMusic, X, Play, Trash2, Sparkles, Plus, Mic2, Radio } from 'lucide-react';
 import { formatTime } from '../lib/youtube';
 
 export default function QueueDrawer({
@@ -9,9 +9,11 @@ export default function QueueDrawer({
   currentSong,
   queue = [],
   onPlaySong,
+  onAddToQueue,
   onRemoveFromQueue,
   onClearQueue,
-  autoPlaySuggestions = []
+  artistRecommendations = [],
+  genreRecommendations = []
 }) {
   if (!isOpen) return null;
 
@@ -34,7 +36,7 @@ export default function QueueDrawer({
             {queue.length > 0 && onClearQueue && (
               <button
                 onClick={onClearQueue}
-                className="px-2.5 py-1 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 text-xs font-semibold flex items-center gap-1 transition-colors"
+                className="px-2.5 py-1 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
                 title="Clear Entire Queue"
               >
                 <Trash2 className="w-3.5 h-3.5" />
@@ -43,7 +45,7 @@ export default function QueueDrawer({
             )}
             <button
               onClick={onClose}
-              className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/10 transition-colors"
+              className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
@@ -107,7 +109,7 @@ export default function QueueDrawer({
                     <div className="flex items-center gap-1.5 flex-shrink-0">
                       <button
                         onClick={() => onPlaySong(song, index)}
-                        className="p-2 rounded-lg bg-purple-500/20 text-purple-300 hover:bg-purple-500/30 transition-colors"
+                        className="p-2 rounded-lg bg-purple-500/20 text-purple-300 hover:bg-purple-500/30 transition-colors cursor-pointer"
                         title="Play Now"
                       >
                         <Play className="w-3.5 h-3.5 fill-current ml-0.5" />
@@ -115,7 +117,7 @@ export default function QueueDrawer({
                       {onRemoveFromQueue && (
                         <button
                           onClick={() => onRemoveFromQueue(index)}
-                          className="p-2 rounded-lg text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                          className="p-2 rounded-lg text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer"
                           title="Remove from Queue"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -132,19 +134,71 @@ export default function QueueDrawer({
             )}
           </div>
 
-          {/* 3. Smart Autoplay (Same Artist / Music Taste) */}
-          {autoPlaySuggestions.length > 0 && (
+          {/* 3. Queue: Same Artist Tracks */}
+          {artistRecommendations.length > 0 && (
             <div className="flex flex-col gap-2 pt-2 border-t border-white/10">
-              <div className="flex items-center gap-1.5 text-[11px] font-bold text-amber-400 uppercase tracking-wider">
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>Up Next: Similar Artist & Taste</span>
+              <div className="flex items-center gap-1.5 text-[11px] font-bold text-cyan-400 uppercase tracking-wider">
+                <Mic2 className="w-3.5 h-3.5" />
+                <span>More by {currentSong?.artist || 'Same Artist'}</span>
               </div>
 
               <div className="flex flex-col gap-2">
-                {autoPlaySuggestions.slice(0, 5).map((song) => (
+                {artistRecommendations.slice(0, 5).map((song) => (
                   <div
                     key={song.id}
-                    className="glass-card p-2.5 px-3 rounded-xl flex items-center justify-between gap-3 group hover:border-amber-500/40 transition-all opacity-80 hover:opacity-100"
+                    className="glass-card p-2.5 px-3 rounded-xl flex items-center justify-between gap-3 group hover:border-cyan-500/40 transition-all opacity-90 hover:opacity-100"
+                  >
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <img
+                        src={song.thumbnail}
+                        alt={song.title}
+                        className="w-10 h-10 rounded-lg object-cover flex-shrink-0"
+                      />
+                      <div className="flex flex-col min-w-0 flex-1">
+                        <h4 className="text-xs font-bold text-white truncate group-hover:text-cyan-300 transition-colors">
+                          {song.title}
+                        </h4>
+                        <p className="text-[11px] text-zinc-400 truncate">{song.artist}</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      {onAddToQueue && (
+                        <button
+                          onClick={() => onAddToQueue(song)}
+                          className="p-2 rounded-lg bg-white/10 text-white hover:bg-white/20 transition-colors cursor-pointer"
+                          title="Add to Queue"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                      <button
+                        onClick={() => onPlaySong(song)}
+                        className="p-2 rounded-lg bg-cyan-500/20 text-cyan-300 hover:bg-cyan-500/30 transition-colors cursor-pointer"
+                        title="Play Track"
+                      >
+                        <Play className="w-3.5 h-3.5 fill-current ml-0.5" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 4. Queue: Same Music Genre & Taste Mix */}
+          {genreRecommendations.length > 0 && (
+            <div className="flex flex-col gap-2 pt-2 border-t border-white/10">
+              <div className="flex items-center gap-1.5 text-[11px] font-bold text-amber-400 uppercase tracking-wider">
+                <Radio className="w-3.5 h-3.5" />
+                <span>Similar Genre & Taste Mix</span>
+              </div>
+
+              <div className="flex flex-col gap-2">
+                {genreRecommendations.slice(0, 5).map((song) => (
+                  <div
+                    key={song.id}
+                    className="glass-card p-2.5 px-3 rounded-xl flex items-center justify-between gap-3 group hover:border-amber-500/40 transition-all opacity-90 hover:opacity-100"
                   >
                     <div className="flex items-center gap-3 min-w-0 flex-1">
                       <img
@@ -160,13 +214,24 @@ export default function QueueDrawer({
                       </div>
                     </div>
 
-                    <button
-                      onClick={() => onPlaySong(song)}
-                      className="p-2 rounded-lg bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 transition-colors flex-shrink-0"
-                      title="Play Track"
-                    >
-                      <Play className="w-3.5 h-3.5 fill-current ml-0.5" />
-                    </button>
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      {onAddToQueue && (
+                        <button
+                          onClick={() => onAddToQueue(song)}
+                          className="p-2 rounded-lg bg-white/10 text-white hover:bg-white/20 transition-colors cursor-pointer"
+                          title="Add to Queue"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                      <button
+                        onClick={() => onPlaySong(song)}
+                        className="p-2 rounded-lg bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 transition-colors cursor-pointer"
+                        title="Play Track"
+                      >
+                        <Play className="w-3.5 h-3.5 fill-current ml-0.5" />
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>

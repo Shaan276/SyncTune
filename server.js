@@ -286,20 +286,29 @@ const server = http.createServer(async (req, res) => {
       });
     }
 
-    // 6. Playlist API
-    if (pathname.includes('playlist')) {
-      const action = searchParams.get('action') || body.action || 'list';
+    // 7. Recommend API (Live YouTube Music Artist & Genre Taste Recommendation)
+    if (pathname.includes('recommend')) {
+      const artist = searchParams.get('artist') || body.artist || '';
+      const title = searchParams.get('title') || body.title || '';
+      const videoId = searchParams.get('videoId') || body.videoId || '';
 
-      if (action === 'create') {
-        const newPl = { id: Date.now(), name: body.name || 'New Playlist', count: 0, songs: [] };
-        memoryStore.playlists.push(newPl);
-        return sendJSON({ success: true, playlist: newPl });
-      }
+      const artistQuery = artist ? `${artist} songs official audio` : `${title} songs`;
+      const genreQuery = artist ? `${artist} radio mix similar songs` : `${title} radio mix`;
 
-      return sendJSON({ success: true, playlists: memoryStore.playlists });
+      const [artistTracks, genreTracks] = await Promise.all([
+        fetchYouTubeSearch(artistQuery, 'music'),
+        fetchYouTubeSearch(genreQuery, 'music')
+      ]);
+
+      return sendJSON({
+        success: true,
+        artist,
+        artistTracks: artistTracks.filter(s => s.id !== videoId).slice(0, 6),
+        genreTracks: genreTracks.filter(s => s.id !== videoId).slice(0, 6)
+      });
     }
 
-    // 7. Usage API
+    // 8. Usage API
     if (pathname.includes('usage')) {
       return sendJSON({
         success: true,

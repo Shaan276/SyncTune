@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Sidebar from '../components/Sidebar';
 import Header from '../components/Header';
 import PlayerFooter from '../components/PlayerFooter';
@@ -16,7 +16,7 @@ import PlaylistsView from '../components/views/PlaylistsView';
 import FriendsView from '../components/views/FriendsView';
 import AdminView from '../components/views/AdminView';
 
-import { searchYouTube, recordSongPlay, getUserRecommendations } from '../lib/youtube';
+import { searchYouTube, recordSongPlay, fetchLiveRecommendations } from '../lib/youtube';
 
 export default function Home() {
   const [user, setUser] = useState(null);
@@ -37,6 +37,8 @@ export default function Home() {
   const [likedSongs, setLikedSongs] = useState([]);
   const [searchResults, setSearchResults] = useState([]);
   const [queue, setQueue] = useState([]);
+  const [artistRecommendations, setArtistRecommendations] = useState([]);
+  const [genreRecommendations, setGenreRecommendations] = useState([]);
   const [isQueueOpen, setIsQueueOpen] = useState(false);
   const [isCinemaOpen, setIsCinemaOpen] = useState(false);
 
@@ -74,6 +76,23 @@ export default function Home() {
     } catch (e) {}
   }, []);
 
+  // Fetch live YouTube recommendations for current song (Same Artist + Same Genre)
+  useEffect(() => {
+    if (!currentSong) return;
+    let active = true;
+
+    fetchLiveRecommendations(currentSong).then((recs) => {
+      if (active) {
+        setArtistRecommendations(recs.artistTracks || []);
+        setGenreRecommendations(recs.genreTracks || []);
+      }
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [currentSong?.id, currentSong?.artist]);
+
   // Sync dark/light theme class on document element
   useEffect(() => {
     if (!isDarkMode) {
@@ -94,8 +113,7 @@ export default function Home() {
 
   const handlePlaySong = useCallback((song) => {
     if (!song || !song.id) return;
-    
-    // Add unique playTrigger timestamp to ensure React always triggers effect even for same song
+
     const songToPlay = {
       ...song,
       playTrigger: Date.now()
@@ -106,10 +124,8 @@ export default function Home() {
     setCurrentTime(0);
     setDuration(song.duration || 210);
 
-    // Record song play count and metadata
     recordSongPlay(song);
 
-    // Append to listening history with ISO timestamp
     const historyItem = {
       ...song,
       playedAtTimestamp: new Date().toISOString()
@@ -129,22 +145,6 @@ export default function Home() {
     }
   }, []);
 
-  // Smart taste & artist suggestions for queue
-  const autoPlaySuggestions = useMemo(() => {
-    const userTop = getUserRecommendations();
-    if (!currentSong) return userTop;
-
-    const currentArtist = (currentSong.artist || '').toLowerCase();
-    const sameArtist = userTop.filter(
-      (s) => s.id !== currentSong.id && (s.artist || '').toLowerCase().includes(currentArtist)
-    );
-    const otherTaste = userTop.filter(
-      (s) => s.id !== currentSong.id && !(s.artist || '').toLowerCase().includes(currentArtist)
-    );
-
-    return [...sameArtist, ...otherTaste];
-  }, [currentSong]);
-
   const handleSkipNext = useCallback(() => {
     if (queue.length > 0) {
       const nextSong = queue[0];
@@ -157,8 +157,13 @@ export default function Home() {
       return;
     }
 
-    if (autoPlaySuggestions.length > 0) {
-      handlePlaySong(autoPlaySuggestions[0]);
+    if (artistRecommendations.length > 0) {
+      handlePlaySong(artistRecommendations[0]);
+      return;
+    }
+
+    if (genreRecommendations.length > 0) {
+      handlePlaySong(genreRecommendations[0]);
       return;
     }
 
@@ -167,7 +172,7 @@ export default function Home() {
       const nextIndex = (currentIndex + 1) % history.length;
       handlePlaySong(history[nextIndex]);
     }
-  }, [queue, autoPlaySuggestions, history, currentSong, handlePlaySong]);
+  }, [queue, artistRecommendations, genreRecommendations, history, currentSong, handlePlaySong]);
 
   const handleSkipPrev = useCallback(() => {
     if (history.length > 1 && currentSong) {
@@ -361,9 +366,11 @@ export default function Home() {
           }
           handlePlaySong(song);
         }}
+        onAddToQueue={handleAddToQueue}
         onRemoveFromQueue={handleRemoveFromQueue}
         onClearQueue={handleClearQueue}
-        autoPlaySuggestions={autoPlaySuggestions}
+        artistRecommendations={artistRecommendations}
+        genreRecommendations={genreRecommendations}
       />
 
       {/* Floating Watch Together Cinema Launcher */}

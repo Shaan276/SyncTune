@@ -63,12 +63,6 @@ export function formatFullDateTime(dateInput) {
   }
 }
 
-/**
- * Dynamic User-Driven Recommendations:
- * - 0 songs listened -> Returns empty array []
- * - 1 to 10 songs listened -> Returns user's exact listened songs ranked by count
- * - >10 songs listened -> Returns the top 10 most frequently listened songs by count
- */
 export function getUserRecommendations() {
   if (typeof window === 'undefined') return [];
   try {
@@ -80,19 +74,37 @@ export function getUserRecommendations() {
       playCount: counts[id] || metaDict[id].playCount || 1
     }));
 
-    // If 0 songs listened, return empty array
     if (songList.length === 0) {
       return [];
     }
 
-    // Sort descending by user's actual play count
     songList.sort((a, b) => b.playCount - a.playCount);
-
-    // Limit to top 10
     return songList.slice(0, 10);
   } catch (e) {
     return [];
   }
+}
+
+export async function fetchLiveRecommendations(song) {
+  if (!song) return { artistTracks: [], genreTracks: [] };
+  try {
+    const params = new URLSearchParams({
+      artist: song.artist || '',
+      title: song.title || '',
+      videoId: song.id || ''
+    });
+    const res = await fetch(`/api/recommend?${params.toString()}`);
+    if (res.ok) {
+      const data = await res.json();
+      return {
+        artistTracks: data.artistTracks || [],
+        genreTracks: data.genreTracks || []
+      };
+    }
+  } catch (e) {
+    console.error("fetchLiveRecommendations error:", e);
+  }
+  return { artistTracks: [], genreTracks: [] };
 }
 
 export async function searchYouTube(query, category = "music") {
