@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Sidebar from '../components/Sidebar';
 import Header from '../components/Header';
 import PlayerFooter from '../components/PlayerFooter';
@@ -8,6 +8,7 @@ import FloatingWatchBtn from '../components/FloatingWatchBtn';
 import LiveReactionOverlay from '../components/LiveReactionOverlay';
 import AuthModal from '../components/AuthModal';
 import YouTubeAudioEngine from '../components/YouTubeAudioEngine';
+import QueueDrawer from '../components/QueueDrawer';
 
 import DashboardView from '../components/views/DashboardView';
 import RoomsView from '../components/views/RoomsView';
@@ -15,7 +16,7 @@ import PlaylistsView from '../components/views/PlaylistsView';
 import FriendsView from '../components/views/FriendsView';
 import AdminView from '../components/views/AdminView';
 
-import { searchYouTube, recordSongPlay } from '../lib/youtube';
+import { searchYouTube, recordSongPlay, getUserRecommendations } from '../lib/youtube';
 
 export default function Home() {
   const [user, setUser] = useState(null);
@@ -26,7 +27,7 @@ export default function Home() {
   const [activeRoom, setActiveRoom] = useState(null);
   const [isDarkMode, setIsDarkMode] = useState(true);
 
-  // Playback state
+  // Playback & Queue state
   const [currentSong, setCurrentSong] = useState(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -35,9 +36,11 @@ export default function Home() {
   const [history, setHistory] = useState([]);
   const [likedSongs, setLikedSongs] = useState([]);
   const [searchResults, setSearchResults] = useState([]);
+  const [queue, setQueue] = useState([]);
+  const [isQueueOpen, setIsQueueOpen] = useState(false);
   const [isCinemaOpen, setIsCinemaOpen] = useState(false);
 
-  // Hydrate user session & history from localStorage
+  // Hydrate user session, history & queue from localStorage
   useEffect(() => {
     setIsClient(true);
     try {
@@ -56,13 +59,17 @@ export default function Home() {
       if (storedHistory) {
         const parsedHist = JSON.parse(storedHistory);
         setHistory(parsedHist);
-        if (parsedHist.length > 0) {
+        if (parsedHist.length > 0 && !currentSong) {
           setCurrentSong(parsedHist[0]);
         }
       }
       const storedLiked = localStorage.getItem('synctune_liked_songs');
       if (storedLiked) {
         setLikedSongs(JSON.parse(storedLiked));
+      }
+      const storedQueue = localStorage.getItem('synctune_queue');
+      if (storedQueue) {
+        setQueue(JSON.parse(storedQueue));
       }
     } catch (e) {}
   }, []);
@@ -87,7 +94,14 @@ export default function Home() {
 
   const handlePlaySong = useCallback((song) => {
     if (!song || !song.id) return;
-    setCurrentSong(song);
+    
+    // Add unique playTrigger timestamp to ensure React always triggers effect even for same song
+    const songToPlay = {
+      ...song,
+      playTrigger: Date.now()
+    };
+
+    setCurrentSong(songToPlay);
     setIsPlaying(true);
     setCurrentTime(0);
     setDuration(song.duration || 210);
@@ -111,8 +125,84 @@ export default function Home() {
     });
 
     if (typeof window !== 'undefined' && window.syncTunePlayAudio) {
-      window.syncTunePlayAudio();
+      window.syncTunePlayAudio(song.id);
     }
+  }, []);
+
+  // Smart taste & artist suggestions for queue
+  const autoPlaySuggestions = useMemo(() => {
+    const userTop = getUserRecommendations();
+    if (!currentSong) return userTop;
+
+    const currentArtist = (currentSong.artist || '').toLowerCase();
+    const sameArtist = userTop.filter(
+      (s) => s.id !== currentSong.id && (s.artist || '').toLowerCase().includes(currentArtist)
+    );
+    const otherTaste = userTop.filter(
+      (s) => s.id !== currentSong.id && !(s.artist || '').toLowerCase().includes(currentArtist)
+    );
+
+    return [...sameArtist, ...otherTaste];
+  }, [currentSong]);
+
+  const handleSkipNext = useCallback(() => {
+    if (queue.length > 0) {
+      const nextSong = queue[0];
+      const remainingQueue = queue.slice(1);
+      setQueue(remainingQueue);
+      try {
+        localStorage.setItem('synctune_queue', JSON.stringify(remainingQueue));
+      } catch (e) {}
+      handlePlaySong(nextSong);
+      return;
+    }
+
+    if (autoPlaySuggestions.length > 0) {
+      handlePlaySong(autoPlaySuggestions[0]);
+      return;
+    }
+
+    if (history.length > 1 && currentSong) {
+      const currentIndex = history.findIndex((s) => s.id === currentSong.id);
+      const nextIndex = (currentIndex + 1) % history.length;
+      handlePlaySong(history[nextIndex]);
+    }
+  }, [queue, autoPlaySuggestions, history, currentSong, handlePlaySong]);
+
+  const handleSkipPrev = useCallback(() => {
+    if (history.length > 1 && currentSong) {
+      const currentIndex = history.findIndex((s) => s.id === currentSong.id);
+      const prevIndex = currentIndex > 0 ? currentIndex - 1 : history.length - 1;
+      handlePlaySong(history[prevIndex]);
+    }
+  }, [history, currentSong, handlePlaySong]);
+
+  const handleAddToQueue = useCallback((song) => {
+    if (!song) return;
+    setQueue((prev) => {
+      const updated = [...prev, song];
+      try {
+        localStorage.setItem('synctune_queue', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
+  }, []);
+
+  const handleRemoveFromQueue = useCallback((index) => {
+    setQueue((prev) => {
+      const updated = prev.filter((_, i) => i !== index);
+      try {
+        localStorage.setItem('synctune_queue', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
+  }, []);
+
+  const handleClearQueue = useCallback(() => {
+    try {
+      localStorage.removeItem('synctune_queue');
+    } catch (e) {}
+    setQueue([]);
   }, []);
 
   const handleClearHistory = useCallback(() => {
@@ -126,11 +216,11 @@ export default function Home() {
     setIsPlaying((prev) => {
       const next = !prev;
       if (next && typeof window !== 'undefined' && window.syncTunePlayAudio) {
-        window.syncTunePlayAudio();
+        window.syncTunePlayAudio(currentSong?.id);
       }
       return next;
     });
-  }, []);
+  }, [currentSong?.id]);
 
   const handleSeek = useCallback((newTime) => {
     setCurrentTime(newTime);
@@ -138,10 +228,6 @@ export default function Home() {
       window.syncTuneSeekAudio(newTime);
     }
   }, []);
-
-  const handleAddToQueue = useCallback((song) => {
-    handlePlaySong(song);
-  }, [handlePlaySong]);
 
   const handleToggleLike = useCallback((song) => {
     setLikedSongs((prev) => {
@@ -250,12 +336,34 @@ export default function Home() {
         volume={volume}
         onTogglePlay={handleTogglePlay}
         onPlayPause={handleTogglePlay}
+        onSkipNext={handleSkipNext}
+        onSkipPrev={handleSkipPrev}
         onSeek={handleSeek}
         onVolumeChange={setVolume}
         onToggleCinema={() => setIsCinemaOpen(!isCinemaOpen)}
         isCinemaOpen={isCinemaOpen}
         likedSongs={likedSongs}
         onToggleLike={handleToggleLike}
+        queue={queue}
+        onToggleQueue={() => setIsQueueOpen(!isQueueOpen)}
+        isQueueOpen={isQueueOpen}
+      />
+
+      {/* Slide-out Queue Drawer */}
+      <QueueDrawer
+        isOpen={isQueueOpen}
+        onClose={() => setIsQueueOpen(false)}
+        currentSong={currentSong}
+        queue={queue}
+        onPlaySong={(song, index) => {
+          if (index !== undefined) {
+            handleRemoveFromQueue(index);
+          }
+          handlePlaySong(song);
+        }}
+        onRemoveFromQueue={handleRemoveFromQueue}
+        onClearQueue={handleClearQueue}
+        autoPlaySuggestions={autoPlaySuggestions}
       />
 
       {/* Floating Watch Together Cinema Launcher */}
@@ -289,10 +397,7 @@ export default function Home() {
         isPlaying={isPlaying}
         volume={volume}
         onTimeUpdate={(time) => setCurrentTime(Math.floor(time))}
-        onEnded={() => {
-          setIsPlaying(false);
-          setCurrentTime(0);
-        }}
+        onEnded={handleSkipNext}
       />
     </div>
   );

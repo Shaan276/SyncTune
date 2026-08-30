@@ -4,6 +4,7 @@ import React, { useEffect, useRef } from 'react';
 export default function YouTubeAudioEngine({ currentSong, isPlaying, volume = 0.8, onTimeUpdate, onEnded }) {
   const playerRef = useRef(null);
   const isReadyRef = useRef(false);
+  const lastSongIdRef = useRef(null);
 
   useEffect(() => {
     // 1. Ensure YouTube IFrame API script is present
@@ -32,7 +33,7 @@ export default function YouTubeAudioEngine({ currentSong, isPlaying, volume = 0.
           showinfo: 0,
           modestbranding: 1,
           playsinline: 1,
-          suggestedQuality: 'small', // Request lowest resolution (144p audio stream only for ultra-low data)
+          suggestedQuality: 'small', // 144p audio-only stream
           origin: typeof window !== 'undefined' ? window.location.origin : ''
         },
         events: {
@@ -63,9 +64,17 @@ export default function YouTubeAudioEngine({ currentSong, isPlaying, volume = 0.
     }
 
     // Global audio play method on user gesture
-    window.syncTunePlayAudio = () => {
+    window.syncTunePlayAudio = (songId) => {
       if (playerRef.current && isReadyRef.current) {
         try {
+          if (songId && songId !== lastSongIdRef.current) {
+            playerRef.current.loadVideoById({
+              videoId: songId,
+              startSeconds: 0,
+              suggestedQuality: 'small'
+            });
+            lastSongIdRef.current = songId;
+          }
           playerRef.current.unMute();
           playerRef.current.setVolume(Math.floor(volume * 100));
           playerRef.current.playVideo();
@@ -78,9 +87,8 @@ export default function YouTubeAudioEngine({ currentSong, isPlaying, volume = 0.
       if (playerRef.current && isReadyRef.current && typeof playerRef.current.seekTo === 'function') {
         try {
           playerRef.current.seekTo(targetSeconds, true);
-          if (isPlaying) {
-            playerRef.current.playVideo();
-          }
+          playerRef.current.unMute();
+          playerRef.current.playVideo();
         } catch (e) {}
       }
     };
@@ -98,6 +106,7 @@ export default function YouTubeAudioEngine({ currentSong, isPlaying, volume = 0.
   useEffect(() => {
     if (playerRef.current && isReadyRef.current && currentSong?.id) {
       try {
+        lastSongIdRef.current = currentSong.id;
         playerRef.current.loadVideoById({
           videoId: currentSong.id,
           startSeconds: 0,
@@ -106,14 +115,12 @@ export default function YouTubeAudioEngine({ currentSong, isPlaying, volume = 0.
         playerRef.current.setPlaybackQuality('small');
         playerRef.current.unMute();
         playerRef.current.setVolume(Math.floor(volume * 100));
-        if (isPlaying) {
-          playerRef.current.playVideo();
-        }
+        playerRef.current.playVideo();
       } catch (err) {
         console.error("Error loading YouTube track:", err);
       }
     }
-  }, [currentSong?.id]);
+  }, [currentSong?.id, currentSong?.playTrigger]);
 
   // Play / Pause toggle
   useEffect(() => {
