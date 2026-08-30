@@ -1,7 +1,7 @@
 'use client';
 import React from 'react';
 import { Play, Plus, Heart, Music, Sparkles } from 'lucide-react';
-import { DEFAULT_POPULAR_SONGS } from '../lib/youtube';
+import { DEFAULT_POPULAR_SONGS } from '../../lib/youtube';
 
 export default function DashboardView({ searchResults, onPlaySong, onAddToQueue, likedSongs, onToggleLike }) {
   const displaySongs = searchResults && searchResults.length > 0 ? searchResults : DEFAULT_POPULAR_SONGS;
