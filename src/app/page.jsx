@@ -39,6 +39,7 @@ export default function Home() {
   const [queue, setQueue] = useState([]);
   const [artistRecommendations, setArtistRecommendations] = useState([]);
   const [genreRecommendations, setGenreRecommendations] = useState([]);
+  const [autoplayMode, setAutoplayMode] = useState('taste'); // 'taste' (default) or 'artist'
   const [isQueueOpen, setIsQueueOpen] = useState(false);
   const [isCinemaOpen, setIsCinemaOpen] = useState(false);
 
@@ -73,8 +74,19 @@ export default function Home() {
       if (storedQueue) {
         setQueue(JSON.parse(storedQueue));
       }
+      const storedAutoplayMode = localStorage.getItem('synctune_autoplay_mode');
+      if (storedAutoplayMode) {
+        setAutoplayMode(storedAutoplayMode);
+      }
     } catch (e) {}
   }, []);
+
+  const handleSetAutoplayMode = (mode) => {
+    setAutoplayMode(mode);
+    try {
+      localStorage.setItem('synctune_autoplay_mode', mode);
+    } catch (e) {}
+  };
 
   // Fetch live YouTube recommendations for current song (Same Artist + Same Genre)
   useEffect(() => {
@@ -83,8 +95,11 @@ export default function Home() {
 
     fetchLiveRecommendations(currentSong).then((recs) => {
       if (active) {
-        setArtistRecommendations(recs.artistTracks || []);
-        setGenreRecommendations(recs.genreTracks || []);
+        // Enforce <10m filter on all incoming recommendation tracks
+        const validArtist = (recs.artistTracks || []).filter((s) => (s.duration || 210) <= 600);
+        const validGenre = (recs.genreTracks || []).filter((s) => (s.duration || 210) <= 600);
+        setArtistRecommendations(validArtist);
+        setGenreRecommendations(validGenre);
       }
     });
 
@@ -108,11 +123,18 @@ export default function Home() {
       return;
     }
     const results = await searchYouTube(query, category);
-    setSearchResults(results);
+    // Filter tracks <= 10m
+    setSearchResults(results.filter((s) => (s.duration || 210) <= 600));
   };
 
   const handlePlaySong = useCallback((song) => {
     if (!song || !song.id) return;
+
+    // Enforce 10-minute maximum duration limit
+    if ((song.duration || 0) > 600) {
+      alert("SyncTune is optimized for low data consumption tracks under 10 minutes.");
+      return;
+    }
 
     const songToPlay = {
       ...song,
@@ -146,6 +168,7 @@ export default function Home() {
   }, []);
 
   const handleSkipNext = useCallback(() => {
+    // 1. Next in User Queue
     if (queue.length > 0) {
       const nextSong = queue[0];
       const remainingQueue = queue.slice(1);
@@ -157,22 +180,35 @@ export default function Home() {
       return;
     }
 
-    if (artistRecommendations.length > 0) {
-      handlePlaySong(artistRecommendations[0]);
-      return;
+    // 2. Next based on user's selected autoplayMode preference
+    if (autoplayMode === 'artist') {
+      if (artistRecommendations.length > 0) {
+        handlePlaySong(artistRecommendations[0]);
+        return;
+      }
+      if (genreRecommendations.length > 0) {
+        handlePlaySong(genreRecommendations[0]);
+        return;
+      }
+    } else {
+      // 'taste' (default)
+      if (genreRecommendations.length > 0) {
+        handlePlaySong(genreRecommendations[0]);
+        return;
+      }
+      if (artistRecommendations.length > 0) {
+        handlePlaySong(artistRecommendations[0]);
+        return;
+      }
     }
 
-    if (genreRecommendations.length > 0) {
-      handlePlaySong(genreRecommendations[0]);
-      return;
-    }
-
+    // 3. Fallback history loop
     if (history.length > 1 && currentSong) {
       const currentIndex = history.findIndex((s) => s.id === currentSong.id);
       const nextIndex = (currentIndex + 1) % history.length;
       handlePlaySong(history[nextIndex]);
     }
-  }, [queue, artistRecommendations, genreRecommendations, history, currentSong, handlePlaySong]);
+  }, [queue, autoplayMode, artistRecommendations, genreRecommendations, history, currentSong, handlePlaySong]);
 
   const handleSkipPrev = useCallback(() => {
     if (history.length > 1 && currentSong) {
@@ -184,6 +220,11 @@ export default function Home() {
 
   const handleAddToQueue = useCallback((song) => {
     if (!song) return;
+    if ((song.duration || 0) > 600) {
+      alert("Only songs under 10 minutes can be added to queue.");
+      return;
+    }
+
     setQueue((prev) => {
       const updated = [...prev, song];
       try {
@@ -371,6 +412,8 @@ export default function Home() {
         onClearQueue={handleClearQueue}
         artistRecommendations={artistRecommendations}
         genreRecommendations={genreRecommendations}
+        autoplayMode={autoplayMode}
+        setAutoplayMode={handleSetAutoplayMode}
       />
 
       {/* Floating Watch Together Cinema Launcher */}

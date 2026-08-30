@@ -79,6 +79,9 @@ function fetchYouTubeSearch(query, category = 'music') {
                 if (parts.length === 2) duration = parts[0] * 60 + parts[1];
                 else if (parts.length === 3) duration = parts[0] * 3600 + parts[1] * 60 + parts[2];
 
+                // Enforce max 10-minute duration limit
+                if (duration > 600) continue;
+
                 const thumbnail = `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`;
 
                 seen.add(videoId);

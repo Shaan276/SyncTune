@@ -43,15 +43,18 @@ async function fetchFromYouTube(searchQuery, excludeId = '') {
             const videoId = video.videoId;
             if (!videoId || seen.has(videoId)) continue;
 
-            const title = video.title?.runs?.[0]?.text || 'YouTube Song';
-            let artist = video.ownerText?.runs?.[0]?.text || 'YouTube Artist';
-            artist = cleanArtistName(artist);
-
             const durationText = video.lengthText?.simpleText || '3:30';
             const parts = durationText.split(':').map(Number);
             let duration = 210;
             if (parts.length === 2) duration = parts[0] * 60 + parts[1];
             else if (parts.length === 3) duration = parts[0] * 3600 + parts[1] * 60 + parts[2];
+
+            // STRICT FILTER: Songs must be under 10 minutes (600 seconds)
+            if (duration > 600) continue;
+
+            const title = video.title?.runs?.[0]?.text || 'YouTube Song';
+            let artist = video.ownerText?.runs?.[0]?.text || 'YouTube Artist';
+            artist = cleanArtistName(artist);
 
             seen.add(videoId);
             songs.push({
@@ -62,7 +65,7 @@ async function fetchFromYouTube(searchQuery, excludeId = '') {
               thumbnail: `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`
             });
 
-            if (songs.length >= 6) break;
+            if (songs.length >= 8) break;
           }
         }
         return songs;
@@ -84,11 +87,11 @@ export async function GET(request) {
     return NextResponse.json({ artistTracks: [], genreTracks: [] });
   }
 
-  // 1. Fetch same artist tracks
+  // 1. Fetch same artist tracks (<10m)
   const artistQuery = artist ? `${artist} songs official audio` : `${title} songs`;
   const artistTracks = await fetchFromYouTube(artistQuery, videoId);
 
-  // 2. Fetch same genre & taste recommendations
+  // 2. Fetch same genre & taste recommendations (<10m)
   const genreQuery = artist ? `${artist} radio mix similar songs` : `${title} radio mix`;
   const genreTracks = await fetchFromYouTube(genreQuery, videoId);
 
