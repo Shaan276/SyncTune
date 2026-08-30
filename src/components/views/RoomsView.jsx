@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Radio, Plus, MessageSquare, ThumbsUp, Users, Play, LogOut, Search, Tv, Sparkles, Mic2, Flame } from 'lucide-react';
 import { supabase } from '../../lib/supabaseClient';
 import { searchYouTube, fetchLiveRecommendations, formatTime } from '../../lib/youtube';
@@ -12,12 +12,7 @@ export default function RoomsView({
   onPlaySong,
   onOpenCinema
 }) {
-  const [rooms, setRooms] = useState([
-    { code: 'BEAT1', host_name: 'Piyush', member_count: 5, song_title: 'One Love', song_artist: 'Shubh', is_playing: 1 },
-    { code: 'CHILL', host_name: 'Alex', member_count: 3, song_title: 'Softly', song_artist: 'Karan Aujla', is_playing: 1 },
-    { code: 'POP10', host_name: 'Sarah', member_count: 4, song_title: 'Happier Than Ever', song_artist: 'Billie Eilish', is_playing: 1 }
-  ]);
-
+  const [rooms, setRooms] = useState([]);
   const [newRoomCode, setNewRoomCode] = useState('');
   const [roomSearchQuery, setRoomSearchQuery] = useState('');
   const [roomSearchResults, setRoomSearchResults] = useState([]);
@@ -28,21 +23,19 @@ export default function RoomsView({
   const [queueVotes, setQueueVotes] = useState({});
   const [roomRecommendations, setRoomRecommendations] = useState([]);
   const [floatingReactions, setFloatingReactions] = useState([]);
+  const [members, setMembers] = useState([]);
+  const [roomHost, setRoomHost] = useState('');
 
-  // Connected members in this room
-  const [members, setMembers] = useState([
-    { id: user?.id || 1, username: user?.username || 'You', isHost: true, isOnline: true },
-    { id: 2, username: 'Aarav', isHost: false, isOnline: true },
-    { id: 3, username: 'Ananya', isHost: false, isOnline: true }
-  ]);
+  const activeRoomRef = useRef(activeRoom);
+  activeRoomRef.current = activeRoom;
 
-  // Fetch all active rooms from API
+  // 1. Fetch all active rooms from API
   const fetchActiveRooms = useCallback(async () => {
     try {
       const res = await fetch('/api/room?action=list');
       if (res.ok) {
         const data = await res.json();
-        if (data.rooms && data.rooms.length > 0) {
+        if (data.rooms) {
           setRooms(data.rooms);
         }
       }
@@ -51,9 +44,162 @@ export default function RoomsView({
 
   useEffect(() => {
     fetchActiveRooms();
+    const interval = setInterval(fetchActiveRooms, 5000);
+    return () => clearInterval(interval);
   }, [fetchActiveRooms]);
 
-  // Fetch dynamic recommendations for the room based on currently playing song
+  // 2. Fetch and Sync Active Room State (Current song, Members, Chats, Upvotes)
+  const syncRoomState = useCallback(async (codeToSync) => {
+    const code = codeToSync || activeRoomRef.current;
+    if (!code) return;
+
+    try {
+      const res = await fetch(`/api/room?action=get&code=${encodeURIComponent(code)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.room) {
+          setMembers(data.members || []);
+          setRoomHost(data.room.host_name || '');
+          if (data.chats) setChats(data.chats);
+          if (data.queueVotes) setQueueVotes(data.queueVotes);
+
+          // If room has a song playing and local client is not playing it, sync playback!
+          if (data.currentSong && data.currentSong.id && (!currentSong || currentSong.id !== data.currentSong.id)) {
+            if (onPlaySong) {
+              onPlaySong(data.currentSong);
+            }
+          }
+        }
+      }
+    } catch (e) {}
+  }, [currentSong, onPlaySong]);
+
+  // 3. Join / Create Room Handler
+  const handleJoinOrCreateRoom = async (codeToJoin) => {
+    const code = (codeToJoin || newRoomCode).toUpperCase().trim() || Math.random().toString(36).substring(2, 7).toUpperCase();
+    const currentUser = user || { id: Date.now(), username: 'Listener' };
+
+    try {
+      const res = await fetch('/api/room', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'join',
+          code,
+          user: currentUser,
+          currentSong
+        })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setActiveRoom(code);
+        setNewRoomCode('');
+        if (data.room) {
+          setMembers(data.room.members || []);
+          setRoomHost(data.room.host_name || currentUser.username);
+          if (data.room.currentSong && onPlaySong) {
+            onPlaySong(data.room.currentSong);
+          }
+        }
+      }
+    } catch (e) {
+      setActiveRoom(code);
+    }
+  };
+
+  // 4. Room Leave Handler
+  const handleLeaveRoom = async () => {
+    if (!activeRoom) return;
+    const code = activeRoom;
+    const currentUser = user || { id: Date.now(), username: 'Listener' };
+
+    try {
+      await fetch('/api/room', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'leave',
+          code,
+          user: currentUser
+        })
+      });
+    } catch (e) {}
+
+    setActiveRoom(null);
+    setMembers([]);
+    setChats([]);
+    setQueueVotes({});
+    fetchActiveRooms();
+  };
+
+  // 5. Play song inside room & broadcast to all members
+  const handlePlaySongInRoom = async (song) => {
+    if (!song) return;
+    onPlaySong(song);
+
+    if (activeRoom) {
+      // 1. Sync to backend API
+      try {
+        await fetch('/api/room', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'update_playback',
+            code: activeRoom,
+            currentSong: song,
+            isPlaying: true,
+            currentTime: 0
+          })
+        });
+      } catch (e) {}
+
+      // 2. Broadcast to Supabase Realtime channel
+      const channel = supabase.channel(`room-events-${activeRoom}`);
+      channel.send({
+        type: 'broadcast',
+        event: 'sync_playback',
+        payload: { currentSong: song, isPlaying: true, currentTime: 0 }
+      });
+    }
+  };
+
+  // 6. Supabase Realtime Channel Subscription + Polling Fallback
+  useEffect(() => {
+    if (!activeRoom) return;
+
+    syncRoomState(activeRoom);
+    const pollTimer = setInterval(() => syncRoomState(activeRoom), 2500);
+
+    const channel = supabase.channel(`room-events-${activeRoom}`);
+
+    channel
+      .on('broadcast', { event: 'sync_playback' }, ({ payload }) => {
+        if (payload?.currentSong && onPlaySong) {
+          onPlaySong(payload.currentSong);
+        }
+      })
+      .on('broadcast', { event: 'new_chat' }, ({ payload }) => {
+        setChats((prev) => [...prev, payload]);
+      })
+      .on('broadcast', { event: 'queue_upvote' }, ({ payload }) => {
+        setQueueVotes((prev) => ({
+          ...prev,
+          [payload.songId]: (prev[payload.songId] || 0) + 1
+        }));
+      })
+      .on('broadcast', { event: 'room_reaction' }, ({ payload }) => {
+        triggerLocalReaction(payload.emoji, payload.username);
+      })
+      .subscribe();
+
+    return () => {
+      clearInterval(pollTimer);
+      supabase.removeChannel(channel);
+    };
+  }, [activeRoom, onPlaySong, syncRoomState]);
+
+  // 7. Dynamic recommendations based on currently playing song
   useEffect(() => {
     if (!currentSong) return;
     let active = true;
@@ -72,39 +218,6 @@ export default function RoomsView({
     };
   }, [currentSong?.id, currentSong?.artist]);
 
-  // Supabase Realtime channel for room sync, chat & reactions
-  useEffect(() => {
-    if (!activeRoom) return;
-
-    const channel = supabase.channel(`room-events-${activeRoom}`);
-
-    channel
-      .on('broadcast', { event: 'new_chat' }, ({ payload }) => {
-        setChats((prev) => [...prev, payload]);
-      })
-      .on('broadcast', { event: 'queue_upvote' }, ({ payload }) => {
-        setQueueVotes((prev) => ({
-          ...prev,
-          [payload.songId]: (prev[payload.songId] || 0) + 1
-        }));
-      })
-      .on('broadcast', { event: 'room_reaction' }, ({ payload }) => {
-        triggerLocalReaction(payload.emoji, payload.username);
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [activeRoom]);
-
-  const handleCreateRoom = (e) => {
-    e.preventDefault();
-    const code = newRoomCode.toUpperCase().trim() || Math.random().toString(36).substring(2, 7).toUpperCase();
-    setActiveRoom(code);
-    setNewRoomCode('');
-  };
-
   const handleRoomSearch = async (e) => {
     e.preventDefault();
     if (!roomSearchQuery.trim()) return;
@@ -114,17 +227,22 @@ export default function RoomsView({
     setIsSearching(false);
   };
 
-  const sendChatMessage = (e) => {
+  const sendChatMessage = async (e) => {
     e.preventDefault();
     if (!chatMsg.trim() || !activeRoom) return;
 
+    const currentUser = user || { username: 'Listener' };
     const payload = {
-      id: Date.now(),
-      username: user?.username || 'Listener',
+      id: Date.now() + Math.random(),
+      username: currentUser.username,
       message: chatMsg.trim(),
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
 
+    setChats((prev) => [...prev, payload]);
+    setChatMsg('');
+
+    // Broadcast via Supabase
     const channel = supabase.channel(`room-events-${activeRoom}`);
     channel.send({
       type: 'broadcast',
@@ -132,8 +250,19 @@ export default function RoomsView({
       payload
     });
 
-    setChats((prev) => [...prev, payload]);
-    setChatMsg('');
+    // Save to API
+    try {
+      await fetch('/api/room', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'chat',
+          code: activeRoom,
+          user: currentUser,
+          message: payload.message
+        })
+      });
+    } catch (err) {}
   };
 
   const triggerLocalReaction = (emoji, senderName) => {
@@ -147,10 +276,11 @@ export default function RoomsView({
 
   const handleSendReaction = (emoji) => {
     if (!activeRoom) return;
+    const currentUser = user || { username: 'Listener' };
 
     const payload = {
       emoji,
-      username: user?.username || 'Listener'
+      username: currentUser.username
     };
 
     const channel = supabase.channel(`room-events-${activeRoom}`);
@@ -163,9 +293,14 @@ export default function RoomsView({
     triggerLocalReaction(emoji, payload.username);
   };
 
-  const handleUpvote = (song) => {
+  const handleUpvote = async (song) => {
     if (!activeRoom) return;
     const songId = song.id;
+
+    setQueueVotes((prev) => ({
+      ...prev,
+      [songId]: (prev[songId] || 0) + 1
+    }));
 
     const channel = supabase.channel(`room-events-${activeRoom}`);
     channel.send({
@@ -174,10 +309,17 @@ export default function RoomsView({
       payload: { songId }
     });
 
-    setQueueVotes((prev) => ({
-      ...prev,
-      [songId]: (prev[songId] || 0) + 1
-    }));
+    try {
+      await fetch('/api/room', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'upvote',
+          code: activeRoom,
+          songId
+        })
+      });
+    } catch (e) {}
   };
 
   // Sort recommendations dynamically by upvote count (highest upvotes move to #1)
@@ -195,7 +337,7 @@ export default function RoomsView({
           {floatingReactions.map((r) => (
             <div
               key={r.id}
-              className="animate-bounce flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/80 border border-purple-500/40 text-sm shadow-xl"
+              className="animate-bounce flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/90 border border-purple-500/40 text-sm shadow-xl"
             >
               <span className="text-xl">{r.emoji}</span>
               <span className="text-[10px] font-bold text-white">{r.senderName}</span>
@@ -215,7 +357,7 @@ export default function RoomsView({
         </div>
 
         {!activeRoom ? (
-          <form onSubmit={handleCreateRoom} className="flex items-center gap-2">
+          <form onSubmit={(e) => { e.preventDefault(); handleJoinOrCreateRoom(); }} className="flex items-center gap-2">
             <input
               type="text"
               placeholder="Enter room code..."
@@ -245,7 +387,7 @@ export default function RoomsView({
             )}
 
             <button
-              onClick={() => setActiveRoom(null)}
+              onClick={handleLeaveRoom}
               className="px-4 py-2 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 font-bold text-xs flex items-center gap-1.5 hover:bg-red-500/20 transition-colors cursor-pointer"
             >
               <LogOut className="w-4 h-4" />
@@ -269,7 +411,7 @@ export default function RoomsView({
                   </div>
                   <div>
                     <h3 className="text-base font-bold text-white">Listening Room {activeRoom}</h3>
-                    <p className="text-xs text-zinc-400">Host: {user?.username || 'You'}</p>
+                    <p className="text-xs text-zinc-400">Host: {roomHost || user?.username || 'You'}</p>
                   </div>
                 </div>
 
@@ -281,7 +423,7 @@ export default function RoomsView({
                 </div>
               </div>
 
-              {/* Inside-Room Track Search Bar (Per User Request) */}
+              {/* Inside-Room Track Search Bar */}
               <form onSubmit={handleRoomSearch} className="flex flex-col gap-2">
                 <div className="flex items-center gap-3 px-4 py-2.5 rounded-xl bg-black/40 border border-cyan-500/30 focus-within:border-cyan-400 transition-all shadow-inner">
                   <Search className="w-4 h-4 text-cyan-400" />
@@ -308,7 +450,7 @@ export default function RoomsView({
                       <button
                         type="button"
                         onClick={() => setRoomSearchResults([])}
-                        className="text-zinc-500 hover:text-white"
+                        className="text-zinc-500 hover:text-white cursor-pointer"
                       >
                         Close
                       </button>
@@ -328,7 +470,7 @@ export default function RoomsView({
                         <button
                           type="button"
                           onClick={() => {
-                            onPlaySong(song);
+                            handlePlaySongInRoom(song);
                             setRoomSearchResults([]);
                           }}
                           className="px-3 py-1 rounded-lg bg-cyan-500/20 text-cyan-300 hover:bg-cyan-500/30 text-xs font-bold flex items-center gap-1 cursor-pointer"
@@ -342,7 +484,7 @@ export default function RoomsView({
                 )}
               </form>
 
-              {/* Dynamic Upvote Recommendation System (Based on current track taste & artist) */}
+              {/* Dynamic Upvote Recommendation System */}
               <div className="flex flex-col gap-3">
                 <div className="flex items-center justify-between">
                   <h4 className="text-xs font-bold text-zinc-300 uppercase tracking-wider flex items-center gap-1.5">
@@ -385,9 +527,9 @@ export default function RoomsView({
                               <span>{votes} {votes === 1 ? 'Upvote' : 'Upvotes'}</span>
                             </button>
                             <button
-                              onClick={() => onPlaySong(song)}
+                              onClick={() => handlePlaySongInRoom(song)}
                               className="p-1.5 rounded-lg bg-cyan-500/20 text-cyan-300 hover:bg-cyan-500/30 transition-colors cursor-pointer"
-                              title="Play Immediately"
+                              title="Play in Room"
                             >
                               <Play className="w-3.5 h-3.5 fill-current ml-0.5" />
                             </button>
@@ -398,7 +540,7 @@ export default function RoomsView({
                   </div>
                 ) : (
                   <div className="p-4 rounded-xl bg-white/5 text-center text-zinc-500 text-xs italic">
-                    Play a track to generate dynamic collaborative upvote recommendations.
+                    Play a track in the room to generate dynamic collaborative upvote recommendations.
                   </div>
                 )}
               </div>
@@ -427,26 +569,39 @@ export default function RoomsView({
                 <div className="flex items-center justify-between pb-2 border-b border-white/10">
                   <div className="flex items-center gap-2">
                     <Users className="w-4 h-4 text-cyan-400" />
-                    <h3 className="text-xs font-bold text-white uppercase tracking-wider">Room Members ({members.length})</h3>
+                    <h3 className="text-xs font-bold text-white uppercase tracking-wider">Room Members ({members.length || 1})</h3>
                   </div>
                   <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
                 </div>
 
                 <div className="flex flex-col gap-2 max-h-36 overflow-y-auto custom-scrollbar">
-                  {members.map((m) => (
-                    <div key={m.id} className="flex items-center justify-between p-1.5 px-2 rounded-lg bg-white/5 text-xs">
+                  {members.length > 0 ? (
+                    members.map((m, idx) => (
+                      <div key={m.id || idx} className="flex items-center justify-between p-1.5 px-2 rounded-lg bg-white/5 text-xs">
+                        <div className="flex items-center gap-2">
+                          <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                          <span className="font-semibold text-white">{m.username}</span>
+                          {m.isHost && (
+                            <span className="text-[9px] font-extrabold px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                              👑 Host
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-[10px] text-zinc-500 font-mono">online</span>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="flex items-center justify-between p-1.5 px-2 rounded-lg bg-white/5 text-xs">
                       <div className="flex items-center gap-2">
                         <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                        <span className="font-semibold text-white">{m.username}</span>
-                        {m.isHost && (
-                          <span className="text-[9px] font-extrabold px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                            👑 Host
-                          </span>
-                        )}
+                        <span className="font-semibold text-white">{user?.username || 'You'}</span>
+                        <span className="text-[9px] font-extrabold px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                          👑 Host
+                        </span>
                       </div>
                       <span className="text-[10px] text-zinc-500 font-mono">online</span>
                     </div>
-                  ))}
+                  )}
                 </div>
               </div>
 
@@ -494,7 +649,7 @@ export default function RoomsView({
             </div>
           </div>
 
-          {/* Other Active Rooms Section (Visible inside room so user can explore & switch) */}
+          {/* Other Active Rooms Explorer */}
           <div className="flex flex-col gap-3 pt-4 border-t border-white/10">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold text-white flex items-center gap-2">
@@ -525,7 +680,7 @@ export default function RoomsView({
                     </div>
 
                     <button
-                      onClick={() => setActiveRoom(r.code)}
+                      onClick={() => handleJoinOrCreateRoom(r.code)}
                       className="w-full py-1.5 rounded-lg bg-gradient-to-r from-purple-600 to-cyan-600 text-white font-bold text-xs hover:opacity-90 transition-opacity cursor-pointer"
                     >
                       Switch to Room {r.code}
@@ -556,7 +711,7 @@ export default function RoomsView({
               </div>
 
               <button
-                onClick={() => setActiveRoom(r.code)}
+                onClick={() => handleJoinOrCreateRoom(r.code)}
                 className="w-full py-2 rounded-xl bg-gradient-to-r from-purple-600 to-cyan-600 text-white font-bold text-xs hover:opacity-90 transition-opacity cursor-pointer"
               >
                 Join Room

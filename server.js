@@ -235,27 +235,105 @@ const server = http.createServer(async (req, res) => {
     // 4. Room API
     if (pathname.includes('room')) {
       const action = searchParams.get('action') || body.action || 'list';
-      const code = (searchParams.get('code') || body.code || 'BEAT1').toUpperCase();
+      const code = (searchParams.get('code') || body.code || '').toUpperCase().trim();
+      const user = body.user || { id: Date.now(), username: body.username || 'Listener' };
+
+      if (action === 'list') {
+        const list = Object.values(memoryStore.rooms).map(r => ({
+          code: r.code,
+          host_name: r.host_name,
+          member_count: (r.members || []).length,
+          song_title: r.currentSong?.title || r.song_title || 'One Love',
+          song_artist: r.currentSong?.artist || r.song_artist || 'Shubh',
+          is_playing: r.isPlaying ? 1 : 0
+        }));
+        return sendJSON({ success: true, rooms: list });
+      }
+
+      if (action === 'get' && code) {
+        const room = memoryStore.rooms[code];
+        if (!room) {
+          return sendJSON({ success: false, error: 'Room not found' }, 404);
+        }
+        return sendJSON({
+          success: true,
+          room,
+          members: room.members || [],
+          currentSong: room.currentSong,
+          isPlaying: room.isPlaying,
+          currentTime: room.currentTime,
+          chats: room.chats || [],
+          queueVotes: room.queueVotes || {}
+        });
+      }
 
       if (action === 'create' || action === 'join') {
         if (!memoryStore.rooms[code]) {
           memoryStore.rooms[code] = {
             code,
-            host_name: body.username || 'Piyush',
-            host_id: 1,
-            member_count: 1,
-            song_title: 'One Love',
-            song_artist: 'Shubh',
-            is_playing: 1,
-            current_time: 0
+            host_name: user.username,
+            host_id: user.id,
+            members: [{ id: user.id, username: user.username, isHost: true, isOnline: true }],
+            currentSong: body.currentSong || {
+              id: 'hT_nvWreIhg',
+              title: 'One Love',
+              artist: 'Shubh',
+              thumbnail: 'https://img.youtube.com/vi/hT_nvWreIhg/mqdefault.jpg',
+              duration: 160
+            },
+            isPlaying: true,
+            currentTime: 0,
+            lastUpdated: Date.now(),
+            chats: [],
+            queueVotes: {}
           };
+        } else {
+          const room = memoryStore.rooms[code];
+          if (!room.members.some(m => m.id === user.id || m.username === user.username)) {
+            room.members.push({
+              id: user.id,
+              username: user.username,
+              isHost: false,
+              isOnline: true
+            });
+          }
         }
         return sendJSON({ success: true, code, room: memoryStore.rooms[code] });
       }
 
-      if (action === 'poll' || action === 'status') {
-        const room = memoryStore.rooms[code] || { code, member_count: 1, is_playing: 1, current_time: 0 };
-        return sendJSON({ success: true, room, members: [{ id: 1, username: 'Piyush', is_online: true }] });
+      if (action === 'update_playback' && code && memoryStore.rooms[code]) {
+        const room = memoryStore.rooms[code];
+        if (body.currentSong) room.currentSong = body.currentSong;
+        if (typeof body.isPlaying === 'boolean') room.isPlaying = body.isPlaying;
+        if (typeof body.currentTime === 'number') room.currentTime = body.currentTime;
+        room.lastUpdated = Date.now();
+        return sendJSON({ success: true, room });
+      }
+
+      if (action === 'chat' && code && memoryStore.rooms[code]) {
+        const room = memoryStore.rooms[code];
+        const newChat = {
+          id: Date.now() + Math.random(),
+          username: user.username,
+          message: body.message,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        };
+        room.chats.push(newChat);
+        return sendJSON({ success: true, chat: newChat, chats: room.chats });
+      }
+
+      if (action === 'upvote' && code && memoryStore.rooms[code]) {
+        const room = memoryStore.rooms[code];
+        if (body.songId) {
+          room.queueVotes[body.songId] = (room.queueVotes[body.songId] || 0) + 1;
+        }
+        return sendJSON({ success: true, queueVotes: room.queueVotes });
+      }
+
+      if (action === 'leave' && code && memoryStore.rooms[code]) {
+        const room = memoryStore.rooms[code];
+        room.members = room.members.filter(m => m.id !== user.id && m.username !== user.username);
+        return sendJSON({ success: true });
       }
 
       return sendJSON({ success: true, rooms: Object.values(memoryStore.rooms) });
