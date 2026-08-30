@@ -7,6 +7,7 @@ import CinemaPlayer from '../components/CinemaPlayer';
 import FloatingWatchBtn from '../components/FloatingWatchBtn';
 import LiveReactionOverlay from '../components/LiveReactionOverlay';
 import AuthModal from '../components/AuthModal';
+import YouTubeAudioEngine from '../components/YouTubeAudioEngine';
 
 import DashboardView from '../components/views/DashboardView';
 import RoomsView from '../components/views/RoomsView';
@@ -241,6 +242,18 @@ export default function Home() {
           allowClose={Boolean(user)}
         />
       )}
+
+      {/* Live YouTube High Fidelity Audio Engine */}
+      <YouTubeAudioEngine
+        currentSong={currentSong}
+        isPlaying={isPlaying}
+        volume={volume}
+        onTimeUpdate={(time) => setCurrentTime(Math.floor(time))}
+        onEnded={() => {
+          setIsPlaying(false);
+          setCurrentTime(0);
+        }}
+      />
     </div>
   );
 }

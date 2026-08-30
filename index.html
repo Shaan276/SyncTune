@@ -68,6 +68,8 @@
         ]
       };
     </script>
+    <!-- Official YouTube Iframe API for Audio Playback -->
+    <script src="https://www.youtube.com/iframe_api"></script>
     <script type="module" crossorigin src="./assets/index-ZIdIQXhF-v5.js?v=2.9.14"></script>
     <script src="./assets/room_player.js?v=2.9.14"></script>
     <link rel="stylesheet" crossorigin href="./assets/index-oOMFrILX-v4.css?v=2.9.14" />
@@ -97,6 +99,7 @@
   </head>
   <body>
     <div id="root"></div>
+    <div id="yt-iframe-placeholder" style="position:fixed;left:-9999px;top:-9999px;width:200px;height:200px;pointer-events:none;"></div>
 
     <script>
       document.addEventListener('DOMContentLoaded', () => {
