@@ -6,42 +6,42 @@ export const DEFAULT_POPULAR_SONGS = [
     title: "One Love - Official Music Video",
     artist: "Shubh",
     duration: 160,
-    thumbnail: "https://i.ytimg.com/vi/hT_nvWreIhg/hqdefault.jpg"
+    thumbnail: "https://img.youtube.com/vi/hT_nvWreIhg/mqdefault.jpg"
   },
   {
     id: "vJQMv7A_N30",
     title: "Cheques - Official Music Video",
     artist: "Shubh",
     duration: 184,
-    thumbnail: "https://i.ytimg.com/vi/vJQMv7A_N30/hqdefault.jpg"
+    thumbnail: "https://img.youtube.com/vi/vJQMv7A_N30/mqdefault.jpg"
   },
   {
     id: "cl0a3iBN78U",
     title: "Elevated - Official Music Video",
     artist: "Shubh",
     duration: 202,
-    thumbnail: "https://i.ytimg.com/vi/cl0a3iBN78U/hqdefault.jpg"
+    thumbnail: "https://img.youtube.com/vi/cl0a3iBN78U/mqdefault.jpg"
   },
   {
     id: "A66TYFbgYAM",
     title: "Softly - Official Music Video",
     artist: "Karan Aujla, Ikky",
     duration: 154,
-    thumbnail: "https://i.ytimg.com/vi/A66TYFbgYAM/hqdefault.jpg"
+    thumbnail: "https://img.youtube.com/vi/A66TYFbgYAM/mqdefault.jpg"
   },
   {
     id: "3gFcCXxjy4U",
     title: "Tauba Tauba - Bad Newz",
     artist: "Karan Aujla",
     duration: 208,
-    thumbnail: "https://i.ytimg.com/vi/3gFcCXxjy4U/hqdefault.jpg"
+    thumbnail: "https://img.youtube.com/vi/3gFcCXxjy4U/mqdefault.jpg"
   },
   {
     id: "k4g4X32dJ8Q",
     title: "Winning Speech - Official Music Video",
     artist: "Karan Aujla",
     duration: 215,
-    thumbnail: "https://i.ytimg.com/vi/k4g4X32dJ8Q/hqdefault.jpg"
+    thumbnail: "https://img.youtube.com/vi/k4g4X32dJ8Q/mqdefault.jpg"
   }
 ];
 
@@ -49,7 +49,7 @@ export async function searchYouTube(query, category = "music") {
   if (!query || !query.trim()) return [];
 
   try {
-    const res = await fetch(`api/search.php?q=${encodeURIComponent(query)}&type=${category}`);
+    const res = await fetch(`/api/search?q=${encodeURIComponent(query)}&type=${category}`);
     if (res.ok) {
       const data = await res.json();
       return data.songs || [];
