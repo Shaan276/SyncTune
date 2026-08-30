@@ -15,7 +15,7 @@ import PlaylistsView from '../components/views/PlaylistsView';
 import FriendsView from '../components/views/FriendsView';
 import AdminView from '../components/views/AdminView';
 
-import { searchYouTube, DEFAULT_POPULAR_SONGS } from '../lib/youtube';
+import { searchYouTube, TOP_RECOMMENDED_SONGS, recordSongPlay } from '../lib/youtube';
 
 export default function Home() {
   const [user, setUser] = useState(null);
@@ -27,17 +27,17 @@ export default function Home() {
   const [isDarkMode, setIsDarkMode] = useState(true);
 
   // Playback state
-  const [currentSong, setCurrentSong] = useState(DEFAULT_POPULAR_SONGS[0]);
+  const [currentSong, setCurrentSong] = useState(TOP_RECOMMENDED_SONGS[0]);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(160);
+  const [duration, setDuration] = useState(260);
   const [volume, setVolume] = useState(0.8);
-  const [history, setHistory] = useState([DEFAULT_POPULAR_SONGS[0]]);
-  const [likedSongs, setLikedSongs] = useState([DEFAULT_POPULAR_SONGS[0]]);
+  const [history, setHistory] = useState([]);
+  const [likedSongs, setLikedSongs] = useState([TOP_RECOMMENDED_SONGS[0]]);
   const [searchResults, setSearchResults] = useState([]);
   const [isCinemaOpen, setIsCinemaOpen] = useState(false);
 
-  // Hydrate user session from localStorage
+  // Hydrate user session & history from localStorage
   useEffect(() => {
     setIsClient(true);
     try {
@@ -51,6 +51,13 @@ export default function Home() {
     } catch (e) {
       setShowAuthModal(true);
     }
+
+    try {
+      const storedHistory = localStorage.getItem('synctune_history');
+      if (storedHistory) {
+        setHistory(JSON.parse(storedHistory));
+      }
+    } catch (e) {}
   }, []);
 
   // Sync dark/light theme class on document element
@@ -62,13 +69,13 @@ export default function Home() {
     }
   }, [isDarkMode]);
 
-  // Audio timer simulation
+  // Audio timer simulation / sync
   useEffect(() => {
     let timer;
     if (isPlaying) {
       timer = setInterval(() => {
         setCurrentTime((prev) => {
-          if (prev >= (duration || 160)) {
+          if (prev >= (duration || 240)) {
             setIsPlaying(false);
             return 0;
           }
@@ -89,19 +96,49 @@ export default function Home() {
   };
 
   const handlePlaySong = (song) => {
+    if (!song) return;
     setCurrentSong(song);
     setIsPlaying(true);
     setCurrentTime(0);
-    setDuration(song.duration || 180);
+    setDuration(song.duration || 210);
+
+    // Increment play count
+    recordSongPlay(song.id);
+
+    // Record to listening history with timestamp
+    const historyItem = {
+      ...song,
+      playedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    };
 
     setHistory((prev) => {
       const filtered = prev.filter((s) => s.id !== song.id);
-      return [song, ...filtered].slice(0, 50); // Cap at 50 songs
+      const updated = [historyItem, ...filtered].slice(0, 50); // Cap at 50 songs
+      try {
+        localStorage.setItem('synctune_history', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
     });
+
+    // Explicit audio play invocation on user gesture
+    if (typeof window !== 'undefined' && window.syncTunePlayAudio) {
+      window.syncTunePlayAudio();
+    }
+  };
+
+  const handleClearHistory = () => {
+    try {
+      localStorage.removeItem('synctune_history');
+    } catch (e) {}
+    setHistory([]);
   };
 
   const handleTogglePlay = () => {
-    setIsPlaying(!isPlaying);
+    const nextState = !isPlaying;
+    setIsPlaying(nextState);
+    if (nextState && typeof window !== 'undefined' && window.syncTunePlayAudio) {
+      window.syncTunePlayAudio();
+    }
   };
 
   const handleSeek = (newTime) => {
@@ -109,7 +146,7 @@ export default function Home() {
   };
 
   const handleAddToQueue = (song) => {
-    // Queuing logic
+    handlePlaySong(song);
   };
 
   const handleToggleLike = (song) => {
@@ -167,6 +204,8 @@ export default function Home() {
               onAddToQueue={handleAddToQueue}
               likedSongs={likedSongs}
               onToggleLike={handleToggleLike}
+              history={history}
+              onClearHistory={handleClearHistory}
             />
           )}
 
