@@ -1,18 +1,19 @@
 'use client';
-import React, { useState, useEffect, useRef } from 'react';
-import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, ListMusic, Heart, Film } from 'lucide-react';
+import React, { useState } from 'react';
+import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, Heart, Film } from 'lucide-react';
 import { formatTime } from '../lib/youtube';
 
 export default function PlayerFooter({
   currentSong,
   isPlaying,
+  onTogglePlay,
   onPlayPause,
   onSkipNext,
   onSkipPrev,
-  currentTime,
-  duration,
+  currentTime = 0,
+  duration = 100,
   onSeek,
-  volume,
+  volume = 0.8,
   onVolumeChange,
   history = [],
   likedSongs = [],
@@ -21,6 +22,14 @@ export default function PlayerFooter({
 }) {
   const [isMuted, setIsMuted] = useState(false);
   const isLiked = currentSong && likedSongs.some(s => s.id === currentSong.id);
+  const handlePlayClick = onTogglePlay || onPlayPause;
+
+  const handleSliderSeek = (e) => {
+    const newSec = parseFloat(e.target.value);
+    if (onSeek) {
+      onSeek(newSec);
+    }
+  };
 
   return (
     <footer className="fixed bottom-0 left-0 right-0 glass-panel border-t border-white/10 p-3 px-6 flex items-center justify-between gap-4 z-40 select-none shadow-2xl">
@@ -36,8 +45,8 @@ export default function PlayerFooter({
           )}
         </div>
         <div className="flex flex-col min-w-0">
-          <h4 className="text-xs font-bold text-white truncate">{currentSong?.title || 'No song selected'}</h4>
-          <p className="text-[11px] text-zinc-400 truncate">{currentSong?.artist || 'Select a track to start'}</p>
+          <h4 className="text-xs font-bold text-white truncate">{currentSong?.title || 'No song playing'}</h4>
+          <p className="text-[11px] text-zinc-400 truncate">{currentSong?.artist || 'Search or pick a track to play'}</p>
         </div>
         {currentSong && onToggleLike && (
           <button
@@ -63,10 +72,10 @@ export default function PlayerFooter({
           </button>
 
           <button
-            onClick={onPlayPause}
-            className="w-10 h-10 rounded-full bg-gradient-to-r from-purple-500 to-cyan-500 text-white flex items-center justify-center shadow-lg shadow-purple-500/30 hover:scale-105 active:scale-95 transition-all"
+            onClick={handlePlayClick}
+            className="w-10 h-10 rounded-full bg-gradient-to-r from-purple-500 to-cyan-500 text-white flex items-center justify-center shadow-lg shadow-purple-500/30 hover:scale-105 active:scale-95 transition-all cursor-pointer"
           >
-            {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
+            {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5 fill-current" />}
           </button>
 
           <button
@@ -94,19 +103,20 @@ export default function PlayerFooter({
           <input
             type="range"
             min="0"
-            max={duration || 100}
+            max={duration > 0 ? duration : 100}
+            step="1"
             value={currentTime || 0}
-            onChange={(e) => onSeek && onSeek(parseFloat(e.target.value))}
+            onChange={handleSliderSeek}
             className="flex-1 h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-cyan-400"
           />
           <span>{formatTime(duration)}</span>
         </div>
       </div>
 
-      {/* Right: Volume & Budget */}
+      {/* Right: Volume & Ultra Low Data Badge */}
       <div className="flex items-center justify-end gap-4 w-1/4 min-w-[180px]">
         <div className="px-2.5 py-1 rounded-lg bg-cyan-500/10 border border-cyan-500/20 text-cyan-300 text-[10px] font-bold font-mono">
-          Low-Data ⚡ ~1.8MB
+          Ultra-Low Data ⚡ ~1MB
         </div>
 
         <div className="flex items-center gap-2">

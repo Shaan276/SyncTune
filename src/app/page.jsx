@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Sidebar from '../components/Sidebar';
 import Header from '../components/Header';
 import PlayerFooter from '../components/PlayerFooter';
@@ -15,7 +15,7 @@ import PlaylistsView from '../components/views/PlaylistsView';
 import FriendsView from '../components/views/FriendsView';
 import AdminView from '../components/views/AdminView';
 
-import { searchYouTube, TOP_RECOMMENDED_SONGS, recordSongPlay } from '../lib/youtube';
+import { searchYouTube, recordSongPlay } from '../lib/youtube';
 
 export default function Home() {
   const [user, setUser] = useState(null);
@@ -27,13 +27,13 @@ export default function Home() {
   const [isDarkMode, setIsDarkMode] = useState(true);
 
   // Playback state
-  const [currentSong, setCurrentSong] = useState(TOP_RECOMMENDED_SONGS[0]);
+  const [currentSong, setCurrentSong] = useState(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(260);
+  const [duration, setDuration] = useState(180);
   const [volume, setVolume] = useState(0.8);
   const [history, setHistory] = useState([]);
-  const [likedSongs, setLikedSongs] = useState([TOP_RECOMMENDED_SONGS[0]]);
+  const [likedSongs, setLikedSongs] = useState([]);
   const [searchResults, setSearchResults] = useState([]);
   const [isCinemaOpen, setIsCinemaOpen] = useState(false);
 
@@ -43,8 +43,7 @@ export default function Home() {
     try {
       const stored = localStorage.getItem('user');
       if (stored && stored !== 'undefined' && stored !== 'null') {
-        const parsed = JSON.parse(stored);
-        setUser(parsed);
+        setUser(JSON.parse(stored));
       } else {
         setShowAuthModal(true);
       }
@@ -55,7 +54,15 @@ export default function Home() {
     try {
       const storedHistory = localStorage.getItem('synctune_history');
       if (storedHistory) {
-        setHistory(JSON.parse(storedHistory));
+        const parsedHist = JSON.parse(storedHistory);
+        setHistory(parsedHist);
+        if (parsedHist.length > 0) {
+          setCurrentSong(parsedHist[0]);
+        }
+      }
+      const storedLiked = localStorage.getItem('synctune_liked_songs');
+      if (storedLiked) {
+        setLikedSongs(JSON.parse(storedLiked));
       }
     } catch (e) {}
   }, []);
@@ -69,23 +76,6 @@ export default function Home() {
     }
   }, [isDarkMode]);
 
-  // Audio timer simulation / sync
-  useEffect(() => {
-    let timer;
-    if (isPlaying) {
-      timer = setInterval(() => {
-        setCurrentTime((prev) => {
-          if (prev >= (duration || 240)) {
-            setIsPlaying(false);
-            return 0;
-          }
-          return prev + 1;
-        });
-      }, 1000);
-    }
-    return () => clearInterval(timer);
-  }, [isPlaying, duration]);
-
   const handleSearch = async (query, category) => {
     if (!query) {
       setSearchResults([]);
@@ -95,67 +85,74 @@ export default function Home() {
     setSearchResults(results);
   };
 
-  const handlePlaySong = (song) => {
-    if (!song) return;
+  const handlePlaySong = useCallback((song) => {
+    if (!song || !song.id) return;
     setCurrentSong(song);
     setIsPlaying(true);
     setCurrentTime(0);
     setDuration(song.duration || 210);
 
-    // Increment play count
-    recordSongPlay(song.id);
+    // Record song play count and metadata
+    recordSongPlay(song);
 
-    // Record to listening history with timestamp
+    // Append to listening history with ISO timestamp
     const historyItem = {
       ...song,
-      playedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      playedAtTimestamp: new Date().toISOString()
     };
 
     setHistory((prev) => {
       const filtered = prev.filter((s) => s.id !== song.id);
-      const updated = [historyItem, ...filtered].slice(0, 50); // Cap at 50 songs
+      const updated = [historyItem, ...filtered].slice(0, 50);
       try {
         localStorage.setItem('synctune_history', JSON.stringify(updated));
       } catch (e) {}
       return updated;
     });
 
-    // Explicit audio play invocation on user gesture
     if (typeof window !== 'undefined' && window.syncTunePlayAudio) {
       window.syncTunePlayAudio();
     }
-  };
+  }, []);
 
-  const handleClearHistory = () => {
+  const handleClearHistory = useCallback(() => {
     try {
       localStorage.removeItem('synctune_history');
     } catch (e) {}
     setHistory([]);
-  };
+  }, []);
 
-  const handleTogglePlay = () => {
-    const nextState = !isPlaying;
-    setIsPlaying(nextState);
-    if (nextState && typeof window !== 'undefined' && window.syncTunePlayAudio) {
-      window.syncTunePlayAudio();
-    }
-  };
+  const handleTogglePlay = useCallback(() => {
+    setIsPlaying((prev) => {
+      const next = !prev;
+      if (next && typeof window !== 'undefined' && window.syncTunePlayAudio) {
+        window.syncTunePlayAudio();
+      }
+      return next;
+    });
+  }, []);
 
-  const handleSeek = (newTime) => {
+  const handleSeek = useCallback((newTime) => {
     setCurrentTime(newTime);
-  };
+    if (typeof window !== 'undefined' && window.syncTuneSeekAudio) {
+      window.syncTuneSeekAudio(newTime);
+    }
+  }, []);
 
-  const handleAddToQueue = (song) => {
+  const handleAddToQueue = useCallback((song) => {
     handlePlaySong(song);
-  };
+  }, [handlePlaySong]);
 
-  const handleToggleLike = (song) => {
+  const handleToggleLike = useCallback((song) => {
     setLikedSongs((prev) => {
       const exists = prev.some((s) => s.id === song.id);
-      if (exists) return prev.filter((s) => s.id !== song.id);
-      return [song, ...prev];
+      const updated = exists ? prev.filter((s) => s.id !== song.id) : [song, ...prev];
+      try {
+        localStorage.setItem('synctune_liked_songs', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
     });
-  };
+  }, []);
 
   const handleLogout = () => {
     localStorage.removeItem('user');
@@ -173,7 +170,7 @@ export default function Home() {
   };
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-[var(--background)] text-[var(--foreground)]">
+    <div className="flex h-screen w-screen overflow-hidden bg-[var(--background)] text-[var(--foreground)] select-none">
       {/* Sidebar */}
       <Sidebar
         activeTab={activeTab}
@@ -252,6 +249,7 @@ export default function Home() {
         duration={duration}
         volume={volume}
         onTogglePlay={handleTogglePlay}
+        onPlayPause={handleTogglePlay}
         onSeek={handleSeek}
         onVolumeChange={setVolume}
         onToggleCinema={() => setIsCinemaOpen(!isCinemaOpen)}
@@ -285,7 +283,7 @@ export default function Home() {
         />
       )}
 
-      {/* Live YouTube High Fidelity Audio Engine */}
+      {/* Live YouTube High Fidelity Ultra-Low Data Audio Engine */}
       <YouTubeAudioEngine
         currentSong={currentSong}
         isPlaying={isPlaying}

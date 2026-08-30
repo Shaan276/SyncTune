@@ -1,14 +1,12 @@
 'use client';
-import React, { useEffect, useRef, useState } from 'react';
-import { Volume2, VolumeX, Radio, Minimize2, Maximize2 } from 'lucide-react';
+import React, { useEffect, useRef } from 'react';
 
 export default function YouTubeAudioEngine({ currentSong, isPlaying, volume = 0.8, onTimeUpdate, onEnded }) {
   const playerRef = useRef(null);
   const isReadyRef = useRef(false);
-  const [isMiniVisible, setIsMiniVisible] = useState(true);
 
   useEffect(() => {
-    // 1. Ensure YouTube IFrame API script is in document head
+    // 1. Ensure YouTube IFrame API script is present
     if (!window.YT) {
       const tag = document.createElement('script');
       tag.src = 'https://www.youtube.com/iframe_api';
@@ -21,10 +19,10 @@ export default function YouTubeAudioEngine({ currentSong, isPlaying, volume = 0.
     const initPlayer = () => {
       if (playerRef.current || !window.YT || !window.YT.Player) return;
 
-      playerRef.current = new window.YT.Player('synctune-live-audio-frame', {
-        height: '100%',
-        width: '100%',
-        videoId: currentSong?.id || '4NRXx6U8ABQ',
+      playerRef.current = new window.YT.Player('synctune-ultra-low-audio-engine', {
+        height: '1',
+        width: '1',
+        videoId: currentSong?.id || '',
         playerVars: {
           autoplay: 1,
           controls: 0,
@@ -34,15 +32,17 @@ export default function YouTubeAudioEngine({ currentSong, isPlaying, volume = 0.
           showinfo: 0,
           modestbranding: 1,
           playsinline: 1,
+          suggestedQuality: 'small', // Request lowest resolution (144p audio stream only for ultra-low data)
           origin: typeof window !== 'undefined' ? window.location.origin : ''
         },
         events: {
           onReady: (event) => {
             isReadyRef.current = true;
             try {
+              event.target.setPlaybackQuality('small');
               event.target.setVolume(Math.floor(volume * 100));
               event.target.unMute();
-              if (isPlaying) {
+              if (isPlaying && currentSong?.id) {
                 event.target.playVideo();
               }
             } catch (e) {}
@@ -62,13 +62,25 @@ export default function YouTubeAudioEngine({ currentSong, isPlaying, volume = 0.
       window.onYouTubeIframeAPIReady = initPlayer;
     }
 
-    // Global audio unlock method callable on any user gesture
+    // Global audio play method on user gesture
     window.syncTunePlayAudio = () => {
       if (playerRef.current && isReadyRef.current) {
         try {
           playerRef.current.unMute();
           playerRef.current.setVolume(Math.floor(volume * 100));
           playerRef.current.playVideo();
+        } catch (e) {}
+      }
+    };
+
+    // Global seek audio method to prevent time snapping
+    window.syncTuneSeekAudio = (targetSeconds) => {
+      if (playerRef.current && isReadyRef.current && typeof playerRef.current.seekTo === 'function') {
+        try {
+          playerRef.current.seekTo(targetSeconds, true);
+          if (isPlaying) {
+            playerRef.current.playVideo();
+          }
         } catch (e) {}
       }
     };
@@ -88,8 +100,10 @@ export default function YouTubeAudioEngine({ currentSong, isPlaying, volume = 0.
       try {
         playerRef.current.loadVideoById({
           videoId: currentSong.id,
-          startSeconds: 0
+          startSeconds: 0,
+          suggestedQuality: 'small'
         });
+        playerRef.current.setPlaybackQuality('small');
         playerRef.current.unMute();
         playerRef.current.setVolume(Math.floor(volume * 100));
         if (isPlaying) {
@@ -141,32 +155,25 @@ export default function YouTubeAudioEngine({ currentSong, isPlaying, volume = 0.
             }
           } catch (e) {}
         }
-      }, 1000);
+      }, 500);
     }
     return () => clearInterval(interval);
   }, [isPlaying, onTimeUpdate]);
 
   return (
     <div
-      className="fixed bottom-24 right-4 z-40 glass-panel border border-purple-500/30 overflow-hidden shadow-2xl transition-all duration-300 rounded-xl"
       style={{
-        width: isMiniVisible ? '160px' : '36px',
-        height: isMiniVisible ? '100px' : '36px',
-        opacity: isMiniVisible ? 0.95 : 0.4
+        position: 'fixed',
+        bottom: 0,
+        right: 0,
+        width: '1px',
+        height: '1px',
+        opacity: 0.001,
+        pointerEvents: 'none',
+        zIndex: 1
       }}
     >
-      <div className="relative w-full h-full bg-black flex items-center justify-center">
-        <div id="synctune-live-audio-frame" className="w-full h-full" />
-        
-        {/* Toggle Mini Dock Overlay */}
-        <button
-          onClick={() => setIsMiniVisible(!isMiniVisible)}
-          className="absolute top-1 right-1 p-1 rounded-md bg-black/60 text-white/80 hover:text-white text-[10px] z-50 backdrop-blur-sm"
-          title={isMiniVisible ? "Minimize Audio Stream Dock" : "Expand Audio Stream Dock"}
-        >
-          {isMiniVisible ? <Minimize2 className="w-3 h-3" /> : <Radio className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />}
-        </button>
-      </div>
+      <div id="synctune-ultra-low-audio-engine" />
     </div>
   );
 }
