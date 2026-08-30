@@ -321,6 +321,7 @@ export default function Home() {
           user={user}
           onSearch={handleSearch}
           activeRoom={activeRoom}
+          activeTab={activeTab}
           onLogout={handleLogout}
           onOpenAuth={() => setShowAuthModal(true)}
         />
@@ -343,7 +344,9 @@ export default function Home() {
               user={user}
               activeRoom={activeRoom}
               setActiveRoom={setActiveRoom}
+              currentSong={currentSong}
               onPlaySong={handlePlaySong}
+              onOpenCinema={() => setIsCinemaOpen(true)}
             />
           )}
 
@@ -427,6 +430,7 @@ export default function Home() {
         isOpen={isCinemaOpen}
         onClose={() => setIsCinemaOpen(false)}
         currentSong={currentSong}
+        activeRoom={activeRoom}
       />
 
       {/* Real-time Emoji Reaction Overlay */}
