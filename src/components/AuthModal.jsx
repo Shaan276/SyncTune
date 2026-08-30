@@ -1,6 +1,6 @@
 'use client';
 import React, { useState } from 'react';
-import { Radio, Lock, Mail, User, Sparkles, ArrowRight, Shield, UserPlus, LogIn } from 'lucide-react';
+import { Radio, Lock, Mail, User, ArrowRight, UserPlus, LogIn } from 'lucide-react';
 
 export default function AuthModal({ onLogin, onClose, allowClose = false }) {
   const [isRegister, setIsRegister] = useState(false);
@@ -36,7 +36,7 @@ export default function AuthModal({ onLogin, onClose, allowClose = false }) {
         setError(data.error || 'Authentication failed. Please try again.');
       }
     } catch (err) {
-      // Fallback local auth for resilience
+      // Fallback local auth
       const cleanEmail = email.trim().toLowerCase();
       const cleanUsername = isRegister ? username.trim() : (cleanEmail.split('@')[0] || 'User');
       const isAdmin = cleanEmail === 'piyushpilkhwal74@gmail.com' || cleanUsername.toLowerCase() === 'piyush';
@@ -56,20 +56,8 @@ export default function AuthModal({ onLogin, onClose, allowClose = false }) {
     }
   };
 
-  const handleGuestLogin = () => {
-    const guestUser = {
-      id: Date.now(),
-      username: `Guest_${Math.floor(1000 + Math.random() * 9000)}`,
-      email: 'guest@synctune.app',
-      role: 'user'
-    };
-    localStorage.setItem('user', JSON.stringify(guestUser));
-    localStorage.setItem('token', 'synctune-jwt-token-guest');
-    onLogin(guestUser);
-  };
-
   return (
-    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xl flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xl flex items-center justify-center p-4">
       <div className="glass-panel w-full max-w-md p-8 border border-purple-500/30 shadow-2xl relative overflow-hidden flex flex-col gap-6 animate-in fade-in zoom-in duration-200">
         <div className="absolute top-0 right-0 w-64 h-64 bg-purple-600/15 rounded-full blur-3xl pointer-events-none" />
         <div className="absolute bottom-0 left-0 w-64 h-64 bg-cyan-600/15 rounded-full blur-3xl pointer-events-none" />
@@ -81,7 +69,7 @@ export default function AuthModal({ onLogin, onClose, allowClose = false }) {
           </div>
           <h2 className="text-2xl font-extrabold text-white text-glow-purple tracking-tight">SyncTune</h2>
           <p className="text-xs text-zinc-400">
-            {isRegister ? 'Create your unique listener ID' : 'Sign in to access synchronized music rooms'}
+            {isRegister ? 'Create your new listener account' : 'Sign in to your SyncTune account'}
           </p>
         </div>
 
@@ -120,7 +108,7 @@ export default function AuthModal({ onLogin, onClose, allowClose = false }) {
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           {isRegister && (
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-bold text-zinc-300">Choose Username / Display Name</label>
+              <label className="text-xs font-bold text-zinc-300">Choose Display Name / Username</label>
               <div className="flex items-center gap-3 px-4 py-2.5 rounded-xl bg-black/40 border border-white/10 focus-within:border-purple-500/50 transition-all">
                 <User className="w-4 h-4 text-zinc-400" />
                 <input
@@ -130,6 +118,7 @@ export default function AuthModal({ onLogin, onClose, allowClose = false }) {
                   onChange={(e) => setUsername(e.target.value)}
                   className="w-full bg-transparent text-xs text-white outline-none placeholder:text-zinc-500"
                   required={isRegister}
+                  autoFocus
                 />
               </div>
             </div>
@@ -168,25 +157,15 @@ export default function AuthModal({ onLogin, onClose, allowClose = false }) {
           <button
             type="submit"
             disabled={loading}
-            className="mt-2 py-3 rounded-xl bg-gradient-to-r from-purple-600 to-cyan-600 text-white text-xs font-bold flex items-center justify-center gap-2 hover:opacity-90 transition-opacity shadow-lg shadow-purple-500/20 disabled:opacity-50"
+            className="mt-2 py-3 rounded-xl bg-gradient-to-r from-purple-600 to-cyan-600 text-white text-xs font-bold flex items-center justify-center gap-2 hover:opacity-90 transition-opacity shadow-lg shadow-purple-500/20 disabled:opacity-50 cursor-pointer"
           >
             <span>{loading ? 'Processing...' : (isRegister ? 'Register & Enter SyncTune' : 'Sign In')}</span>
             <ArrowRight className="w-4 h-4" />
           </button>
         </form>
 
-        {/* Guest Option & Close */}
-        <div className="flex items-center justify-between pt-2 border-t border-white/10">
-          <button
-            type="button"
-            onClick={handleGuestLogin}
-            className="text-xs text-zinc-400 hover:text-cyan-400 transition-colors font-medium flex items-center gap-1.5"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
-            <span>Continue as Guest</span>
-          </button>
-
-          {allowClose && onClose && (
+        {allowClose && onClose && (
+          <div className="flex justify-end pt-2 border-t border-white/10">
             <button
               type="button"
               onClick={onClose}
@@ -194,8 +173,8 @@ export default function AuthModal({ onLogin, onClose, allowClose = false }) {
             >
               Cancel
             </button>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </div>
   );

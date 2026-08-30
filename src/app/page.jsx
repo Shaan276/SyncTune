@@ -124,6 +124,9 @@ export default function Home() {
     localStorage.removeItem('user');
     localStorage.removeItem('token');
     setUser(null);
+    setActiveTab('dashboard');
+    setActiveRoom(null);
+    setIsPlaying(false);
     setShowAuthModal(true);
   };
 
@@ -192,7 +195,7 @@ export default function Home() {
             />
           )}
 
-          {activeTab === 'admin' && (
+          {activeTab === 'admin' && user?.role === 'admin' && (
             <AdminView
               user={user}
               activeRoom={activeRoom}
