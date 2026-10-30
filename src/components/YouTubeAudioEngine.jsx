@@ -125,13 +125,15 @@ export default function YouTubeAudioEngine({
     }
   }, [isPlaying, useIframeFallback, volume]);
 
-  // 3. MediaSession API integration for iOS Control Center, Lock Screen, and Android Shade
+  // 3. MediaSession API metadata & action handlers (Persistent notification while paused)
   useEffect(() => {
     if (typeof window === 'undefined' || !('mediaSession' in navigator)) return;
 
     if (currentSong) {
       try {
         const artworkUrl = currentSong.thumbnail || `https://img.youtube.com/vi/${currentSong.id}/hqdefault.jpg`;
+        
+        // Only allocate metadata when track identity changes, preventing Android/iOS notification dismissal on pause
         navigator.mediaSession.metadata = new window.MediaMetadata({
           title: currentSong.title || 'SyncTune Track',
           artist: currentSong.artist || 'SyncTune Artist',
@@ -143,7 +145,7 @@ export default function YouTubeAudioEngine({
           ]
         });
 
-        navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+        navigator.mediaSession.playbackState = isPlayingRef.current ? 'playing' : 'paused';
 
         navigator.mediaSession.setActionHandler('play', () => {
           if (audioRef.current && !useIframeFallbackRef.current) {
@@ -158,6 +160,15 @@ export default function YouTubeAudioEngine({
           }
           if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
             navigator.mediaSession.playbackState = 'playing';
+            if ('setPositionState' in navigator.mediaSession && duration > 0) {
+              try {
+                navigator.mediaSession.setPositionState({
+                  duration: Math.max(1, duration),
+                  playbackRate: 1,
+                  position: Math.min(audioRef.current?.currentTime || currentTime, duration)
+                });
+              } catch (e) {}
+            }
           }
           if (onPlayRef.current) {
             onPlayRef.current();
@@ -176,7 +187,17 @@ export default function YouTubeAudioEngine({
             } catch (e) {}
           }
           if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
+            // Explicitly set state to paused without destroying metadata so notification stays pinned
             navigator.mediaSession.playbackState = 'paused';
+            if ('setPositionState' in navigator.mediaSession && duration > 0) {
+              try {
+                navigator.mediaSession.setPositionState({
+                  duration: Math.max(1, duration),
+                  playbackRate: 0,
+                  position: Math.min(audioRef.current?.currentTime || currentTime, duration)
+                });
+              } catch (e) {}
+            }
           }
           if (onPauseRef.current) {
             onPauseRef.current();
@@ -209,17 +230,24 @@ export default function YouTubeAudioEngine({
           const target = Math.max(0, current - skipTime);
           if (window.syncTuneSeekAudio) window.syncTuneSeekAudio(target);
         });
-
-        if ('setPositionState' in navigator.mediaSession && duration > 0) {
-          navigator.mediaSession.setPositionState({
-            duration: Math.max(1, duration),
-            playbackRate: isPlaying ? 1 : 0,
-            position: Math.min(currentTime, duration)
-          });
-        }
       } catch (err) {}
     }
-  }, [currentSong?.id, currentSong?.title, currentSong?.artist, isPlaying, duration, volume]);
+  }, [currentSong?.id, currentSong?.title, currentSong?.artist, currentSong?.thumbnail, duration]);
+
+  // Synchronize MediaSession playbackState and position without touching metadata
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('mediaSession' in navigator)) return;
+    try {
+      navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+      if ('setPositionState' in navigator.mediaSession && duration > 0) {
+        navigator.mediaSession.setPositionState({
+          duration: Math.max(1, duration),
+          playbackRate: isPlaying ? 1 : 0,
+          position: Math.min(currentTime, duration)
+        });
+      }
+    } catch (e) {}
+  }, [isPlaying, duration, currentTime]);
 
   // 4. Initialize YouTube IFrame API ONLY IF fallback is required
   useEffect(() => {
@@ -443,6 +471,16 @@ export default function YouTubeAudioEngine({
                 } catch (err) {}
               }
             }
+          }
+        }}
+        onPlay={() => {
+          if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
+            navigator.mediaSession.playbackState = 'playing';
+          }
+        }}
+        onPause={() => {
+          if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
+            navigator.mediaSession.playbackState = 'paused';
           }
         }}
         onEnded={() => {
