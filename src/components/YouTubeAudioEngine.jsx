@@ -1,8 +1,6 @@
 'use client';
-import React, { useEffect, useRef } from 'react';
-
-// 44-byte silent WAV data URI to keep mobile OS audio session active
-const SILENT_AUDIO_URI = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { Tv, Minimize2 } from 'lucide-react';
 
 export default function YouTubeAudioEngine({
   currentSong,
@@ -12,6 +10,8 @@ export default function YouTubeAudioEngine({
   duration = 100,
   onTimeUpdate,
   onEnded,
+  onPlay,
+  onPause,
   onTogglePlay,
   onSkipNext,
   onSkipPrev,
@@ -23,8 +23,19 @@ export default function YouTubeAudioEngine({
   const isPlayingRef = useRef(isPlaying);
   isPlayingRef.current = isPlaying;
 
+  const currentTimeRef = useRef(currentTime);
+  currentTimeRef.current = currentTime;
+  const currentSongRef = useRef(currentSong);
+  currentSongRef.current = currentSong;
+  const volumeRef = useRef(volume);
+  volumeRef.current = volume;
+
+  const [isMiniPlayerOpen, setIsMiniPlayerOpen] = useState(false);
+
   const onEndedRef = useRef(onEnded);
   const onTimeUpdateRef = useRef(onTimeUpdate);
+  const onPlayRef = useRef(onPlay);
+  const onPauseRef = useRef(onPause);
   const onTogglePlayRef = useRef(onTogglePlay);
   const onSkipNextRef = useRef(onSkipNext);
   const onSkipPrevRef = useRef(onSkipPrev);
@@ -32,7 +43,27 @@ export default function YouTubeAudioEngine({
 
   const silentAudioRef = useRef(null);
   const audioContextRef = useRef(null);
-  const isAudioUnlockedRef = useRef(false);
+  const reloadVideoWithVoiceRef = useRef(null);
+
+  // Dedicated function to reload the video stream from YouTube CDN so voice is guaranteed to play
+  const reloadVideoWithVoice = useCallback((forcedTime) => {
+    if (!playerRef.current || !isReadyRef.current || !currentSongRef.current?.id) return;
+    try {
+      const targetTime = typeof forcedTime === 'number' ? forcedTime : (currentTimeRef.current || 0);
+      playerRef.current.loadVideoById({
+        videoId: currentSongRef.current.id,
+        startSeconds: Math.max(0, targetTime),
+        suggestedQuality: 'small'
+      });
+      playerRef.current.unMute();
+      playerRef.current.setVolume(Math.floor((volumeRef.current || 0.8) * 100));
+      playerRef.current.playVideo();
+    } catch (e) {
+      console.warn('Error reloading YouTube video stream:', e);
+    }
+  }, []);
+
+  reloadVideoWithVoiceRef.current = reloadVideoWithVoice;
 
   // Sync latest callback references
   useEffect(() => {
@@ -41,6 +72,12 @@ export default function YouTubeAudioEngine({
   useEffect(() => {
     onTimeUpdateRef.current = onTimeUpdate;
   }, [onTimeUpdate]);
+  useEffect(() => {
+    onPlayRef.current = onPlay;
+  }, [onPlay]);
+  useEffect(() => {
+    onPauseRef.current = onPause;
+  }, [onPause]);
   useEffect(() => {
     onTogglePlayRef.current = onTogglePlay;
   }, [onTogglePlay]);
@@ -57,32 +94,55 @@ export default function YouTubeAudioEngine({
   // 1. Synchronously Unlock Audio Pipeline on User Interaction (Required for iOS Safari & Android Chrome)
   useEffect(() => {
     const unlockAudioSession = () => {
-      // Unlock HTML5 Audio
-      const audio = silentAudioRef.current;
-      if (audio) {
-        audio.play().catch(() => {});
+      // 0. Configure iOS Audio Session API for background playback
+      if (typeof navigator !== 'undefined' && 'audioSession' in navigator) {
+        try {
+          navigator.audioSession.type = 'playback';
+        } catch (e) {}
       }
 
-      // Unlock Web Audio API AudioContext
+      // 1. Initialize Web Audio API AudioContext with live MediaStream
+      let ctx = audioContextRef.current;
       try {
-        if (!audioContextRef.current) {
+        if (!ctx) {
           const AudioContextClass = window.AudioContext || window.webkitAudioContext;
           if (AudioContextClass) {
-            const ctx = new AudioContextClass();
-            const buffer = ctx.createBuffer(1, 1, 22050);
-            const source = ctx.createBufferSource();
-            source.buffer = buffer;
-            source.connect(ctx.destination);
-            source.start(0);
+            ctx = new AudioContextClass();
             audioContextRef.current = ctx;
           }
         }
-        if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
-          audioContextRef.current.resume().catch(() => {});
+
+        if (ctx) {
+          if (ctx.state === 'suspended') {
+            ctx.resume().catch(() => {});
+          }
+
+          // Attach continuous live MediaStream to audio element to keep OS audio session active
+          const audio = silentAudioRef.current;
+          if (audio && !audio.srcObject && typeof ctx.createMediaStreamDestination === 'function') {
+            const dest = ctx.createMediaStreamDestination();
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            gain.gain.value = 0.0001; // inaudible amplitude
+            osc.connect(gain);
+            gain.connect(dest);
+            osc.start();
+            audio.srcObject = dest.stream;
+          }
+
+          if (audio && isPlayingRef.current) {
+            audio.play().catch(() => {});
+          }
         }
       } catch (e) {}
 
-      isAudioUnlockedRef.current = true;
+      // If YouTube player is already initialized and supposed to play, ensure it is unmuted
+      if (playerRef.current && isReadyRef.current && isPlayingRef.current) {
+        try {
+          playerRef.current.unMute();
+          playerRef.current.playVideo();
+        } catch (e) {}
+      }
     };
 
     window.addEventListener('touchstart', unlockAudioSession, { passive: true });
@@ -142,12 +202,52 @@ export default function YouTubeAudioEngine({
 
         navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
 
+        // Lock Screen Play: Explicitly triggers resume with voice
         navigator.mediaSession.setActionHandler('play', () => {
-          if (onTogglePlayRef.current) onTogglePlayRef.current();
+          if (reloadVideoWithVoiceRef.current) {
+            reloadVideoWithVoiceRef.current(currentTimeRef.current);
+          } else if (playerRef.current && isReadyRef.current) {
+            try {
+              playerRef.current.unMute();
+              playerRef.current.playVideo();
+            } catch (e) {}
+          }
+          if (silentAudioRef.current) {
+            silentAudioRef.current.play().catch(() => {});
+          }
+          if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+            audioContextRef.current.resume().catch(() => {});
+          }
+          if (onPlayRef.current) {
+            onPlayRef.current();
+          } else if (onTogglePlayRef.current) {
+            onTogglePlayRef.current();
+          }
+          if ('mediaSession' in navigator) {
+            navigator.mediaSession.playbackState = 'playing';
+          }
         });
+
+        // Lock Screen Pause: Explicitly triggers pause
         navigator.mediaSession.setActionHandler('pause', () => {
-          if (onTogglePlayRef.current) onTogglePlayRef.current();
+          if (playerRef.current && isReadyRef.current) {
+            try {
+              playerRef.current.pauseVideo();
+            } catch (e) {}
+          }
+          if (silentAudioRef.current) {
+            silentAudioRef.current.pause();
+          }
+          if (onPauseRef.current) {
+            onPauseRef.current();
+          } else if (onTogglePlayRef.current) {
+            onTogglePlayRef.current();
+          }
+          if ('mediaSession' in navigator) {
+            navigator.mediaSession.playbackState = 'paused';
+          }
         });
+
         navigator.mediaSession.setActionHandler('previoustrack', () => {
           if (onSkipPrevRef.current) onSkipPrevRef.current();
         });
@@ -187,8 +287,8 @@ export default function YouTubeAudioEngine({
       if (playerRef.current || !window.YT || !window.YT.Player) return;
 
       playerRef.current = new window.YT.Player('synctune-ultra-low-audio-engine', {
-        height: '200',
-        width: '200',
+        height: '240',
+        width: '320',
         videoId: currentSong?.id || '',
         playerVars: {
           autoplay: 1,
@@ -219,17 +319,25 @@ export default function YouTubeAudioEngine({
               if (onEndedRef.current) {
                 onEndedRef.current();
               }
+            } else if (event.data === window.YT.PlayerState.PLAYING) {
+              // Ensure voice is unmuted whenever video enters playing state
+              try {
+                event.target.unMute();
+                event.target.setVolume(Math.floor((volumeRef.current || 0.8) * 100));
+              } catch (e) {}
+
+              if (silentAudioRef.current && silentAudioRef.current.paused) {
+                silentAudioRef.current.play().catch(() => {});
+              }
+              if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
+                navigator.mediaSession.playbackState = 'playing';
+              }
             } else if (event.data === window.YT.PlayerState.PAUSED) {
-              // Mobile browser attempt to pause video when minimized/locked
-              if (isPlayingRef.current) {
-                // Instantly re-assert playback so music doesn't stop
-                setTimeout(() => {
-                  try {
-                    if (isPlayingRef.current && playerRef.current) {
-                      playerRef.current.playVideo();
-                    }
-                  } catch (e) {}
-                }, 50);
+              // If tab is visible and React state is paused, update media session
+              if (document.visibilityState === 'visible' && !isPlayingRef.current) {
+                if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
+                  navigator.mediaSession.playbackState = 'paused';
+                }
               }
             }
           }
@@ -247,16 +355,16 @@ export default function YouTubeAudioEngine({
     window.syncTunePlayAudio = (songId) => {
       if (playerRef.current && isReadyRef.current) {
         try {
-          if (songId && songId !== lastSongIdRef.current) {
-            playerRef.current.loadVideoById({
-              videoId: songId,
-              startSeconds: 0,
-              suggestedQuality: 'small'
-            });
-            lastSongIdRef.current = songId;
-          }
+          const songToPlay = songId || currentSongRef.current?.id;
+          const targetTime = (songToPlay === lastSongIdRef.current) ? (currentTimeRef.current || 0) : 0;
+          playerRef.current.loadVideoById({
+            videoId: songToPlay,
+            startSeconds: targetTime,
+            suggestedQuality: 'small'
+          });
+          lastSongIdRef.current = songToPlay;
           playerRef.current.unMute();
-          playerRef.current.setVolume(Math.floor(volume * 100));
+          playerRef.current.setVolume(Math.floor((volumeRef.current || 0.8) * 100));
           playerRef.current.playVideo();
         } catch (e) {}
       }
@@ -278,27 +386,43 @@ export default function YouTubeAudioEngine({
       }
     };
 
-    // 5. Lifecycle event handlers: NEVER pause audio on visibilitychange/pagehide
+    // 5. Visibility & Focus Handlers: Seamlessly reload video stream with voice whenever user changes tab or returns
     const handleVisibilityChange = () => {
-      if (isPlayingRef.current && playerRef.current) {
-        try {
-          if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
-            audioContextRef.current.resume().catch(() => {});
+      if (document.visibilityState === 'visible') {
+        if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+          audioContextRef.current.resume().catch(() => {});
+        }
+        if (silentAudioRef.current && isPlayingRef.current) {
+          silentAudioRef.current.play().catch(() => {});
+        }
+        if (isPlayingRef.current && currentSongRef.current?.id) {
+          // Whenever the user in mobile changes the tab or comes back: load the video just like YouTube does
+          if (reloadVideoWithVoiceRef.current) {
+            reloadVideoWithVoiceRef.current(currentTimeRef.current);
           }
-          if (silentAudioRef.current) {
-            silentAudioRef.current.play().catch(() => {});
+        }
+      }
+    };
+
+    const handleWindowFocus = () => {
+      if (document.visibilityState === 'visible' && isPlayingRef.current && currentSongRef.current?.id) {
+        const state = typeof playerRef.current?.getPlayerState === 'function' ? playerRef.current.getPlayerState() : -1;
+        if (state !== 1) { // 1 is PLAYING
+          if (reloadVideoWithVoiceRef.current) {
+            reloadVideoWithVoiceRef.current(currentTimeRef.current);
           }
-          playerRef.current.playVideo();
-        } catch (e) {}
+        }
       }
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('pagehide', handleVisibilityChange);
+    window.addEventListener('focus', handleWindowFocus);
+    window.addEventListener('pageshow', handleVisibilityChange);
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('pagehide', handleVisibilityChange);
+      window.removeEventListener('focus', handleWindowFocus);
+      window.removeEventListener('pageshow', handleVisibilityChange);
       if (playerRef.current && typeof playerRef.current.destroy === 'function') {
         playerRef.current.destroy();
         playerRef.current = null;
@@ -366,13 +490,20 @@ export default function YouTubeAudioEngine({
               onTimeUpdateRef.current(time);
             }
 
-            // Auto-resume if mobile OS attempted to pause in background
-            if (isPlayingRef.current) {
-              const state = playerRef.current.getPlayerState();
-              if (state === 2) {
-                // State 2 is PAUSED
-                playerRef.current.playVideo();
-              }
+            // Auto-detect stalled or muted voice while document is visible
+            if (isPlayingRef.current && document.visibilityState === 'visible' && playerRef.current) {
+              try {
+                const state = typeof playerRef.current.getPlayerState === 'function' ? playerRef.current.getPlayerState() : -1;
+                if (state === 2 || state === -1) {
+                  // 2 is PAUSED, -1 is UNSTARTED -> reload video with voice just like YouTube does
+                  if (reloadVideoWithVoiceRef.current) {
+                    reloadVideoWithVoiceRef.current(currentTimeRef.current);
+                  }
+                } else if (state === 1 && typeof playerRef.current.isMuted === 'function' && playerRef.current.isMuted()) {
+                  playerRef.current.unMute();
+                  playerRef.current.setVolume(Math.floor((volumeRef.current || 0.8) * 100));
+                }
+              } catch (e) {}
             }
           } catch (e) {}
         }
@@ -383,32 +514,61 @@ export default function YouTubeAudioEngine({
 
   return (
     <>
-      {/* Real HTML5 audio carrier element unlocked by user interaction */}
+      {/* Active HTML5 audio carrier element for OS media pipeline */}
       <audio
         ref={silentAudioRef}
-        src={SILENT_AUDIO_URI}
         loop
         playsInline
         preload="auto"
-        style={{ display: 'none' }}
-      />
-
-      {/* Styled with scale(0.001) so browser and YouTube detect normal dimensions without auto-pause */}
-      <div
         style={{
           position: 'fixed',
-          bottom: 0,
-          right: 0,
-          width: '240px',
-          height: '180px',
-          transform: 'scale(0.001)',
-          transformOrigin: 'bottom right',
-          pointerEvents: 'none',
-          zIndex: 1
+          bottom: -100,
+          right: -100,
+          width: '1px',
+          height: '1px',
+          opacity: 0.001,
+          pointerEvents: 'none'
         }}
+      />
+
+      {/* YouTube Video Player & Floating Mini-Player (same way YouTube does) */}
+      <div
+        className={`fixed z-30 transition-all duration-300 ${
+          isMiniPlayerOpen
+            ? 'bottom-20 right-3 sm:bottom-24 sm:right-6 w-52 h-32 sm:w-72 sm:h-44 shadow-2xl rounded-2xl border border-emerald-500/30 bg-black/95 overflow-hidden'
+            : 'bottom-0 right-0 w-[240px] h-[180px] opacity-[0.001] pointer-events-none -z-10'
+        }`}
       >
-        <div id="synctune-ultra-low-audio-engine" />
+        {isMiniPlayerOpen && (
+          <div className="absolute top-1.5 left-2 right-2 flex items-center justify-between z-10 pointer-events-auto">
+            <div className="flex items-center gap-1.5 bg-black/70 backdrop-blur-md px-2 py-0.5 rounded-full border border-white/10">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="text-[9px] font-bold text-white tracking-wider uppercase">YouTube Video</span>
+            </div>
+            <button
+              onClick={() => setIsMiniPlayerOpen(false)}
+              className="p-1 rounded-full bg-black/70 text-zinc-300 hover:text-white border border-white/10 transition-colors"
+              title="Minimize Video (Audio Only)"
+            >
+              <Minimize2 className="w-3 h-3" />
+            </button>
+          </div>
+        )}
+
+        <div id="synctune-ultra-low-audio-engine" className="w-full h-full" />
       </div>
+
+      {/* Floating Toggle Pill when Mini-Player is closed and song is playing */}
+      {!isMiniPlayerOpen && currentSong?.id && (
+        <button
+          onClick={() => setIsMiniPlayerOpen(true)}
+          className="fixed bottom-20 right-3 sm:bottom-24 sm:right-6 z-30 flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-[#141C30]/90 hover:bg-[#1e2a48] border border-white/10 hover:border-emerald-500/40 text-zinc-300 hover:text-white shadow-lg backdrop-blur-md transition-all text-xs font-semibold cursor-pointer group"
+          title="Watch YouTube Video Stream"
+        >
+          <Tv className="w-3.5 h-3.5 text-emerald-400 group-hover:scale-110 transition-transform" />
+          <span className="text-[11px] hidden xs:inline">Watch Video</span>
+        </button>
+      )}
     </>
   );
 }

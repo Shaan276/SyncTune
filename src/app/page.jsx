@@ -450,6 +450,41 @@ export default function Home() {
     setHistory([]);
   }, []);
 
+  const handleDirectPlay = useCallback(() => {
+    setIsPlaying(true);
+    if (typeof window !== 'undefined' && window.syncTunePlayAudio) {
+      window.syncTunePlayAudio(currentSongRef.current?.id);
+    }
+    if (activeRoomRef.current) {
+      fetch('/api/room', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'resume',
+          code: activeRoomRef.current,
+          currentTime: currentTimeRef.current,
+          user: userRef.current
+        })
+      }).catch(() => {});
+    }
+  }, []);
+
+  const handleDirectPause = useCallback(() => {
+    setIsPlaying(false);
+    if (activeRoomRef.current) {
+      fetch('/api/room', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'pause',
+          code: activeRoomRef.current,
+          currentTime: currentTimeRef.current,
+          user: userRef.current
+        })
+      }).catch(() => {});
+    }
+  }, []);
+
   const handleTogglePlay = useCallback(() => {
     setIsPlaying((prev) => {
       const next = !prev;
@@ -682,6 +717,8 @@ export default function Home() {
         duration={duration}
         onTimeUpdate={(time) => setCurrentTime(Math.floor(time))}
         onEnded={handleSkipNext}
+        onPlay={handleDirectPlay}
+        onPause={handleDirectPause}
         onTogglePlay={handleTogglePlay}
         onSkipNext={handleSkipNext}
         onSkipPrev={handleSkipPrev}
