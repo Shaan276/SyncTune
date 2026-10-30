@@ -202,13 +202,12 @@ export default function YouTubeAudioEngine({
 
         navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
 
-        // Lock Screen Play: Explicitly triggers resume with voice
+        // Lock Screen Play: Explicitly triggers resume
         navigator.mediaSession.setActionHandler('play', () => {
-          if (reloadVideoWithVoiceRef.current) {
-            reloadVideoWithVoiceRef.current(currentTimeRef.current);
-          } else if (playerRef.current && isReadyRef.current) {
+          if (playerRef.current && isReadyRef.current) {
             try {
               playerRef.current.unMute();
+              playerRef.current.setVolume(Math.floor((volumeRef.current || 0.8) * 100));
               playerRef.current.playVideo();
             } catch (e) {}
           }
@@ -356,16 +355,19 @@ export default function YouTubeAudioEngine({
       if (playerRef.current && isReadyRef.current) {
         try {
           const songToPlay = songId || currentSongRef.current?.id;
-          const targetTime = (songToPlay === lastSongIdRef.current) ? (currentTimeRef.current || 0) : 0;
-          playerRef.current.loadVideoById({
-            videoId: songToPlay,
-            startSeconds: targetTime,
-            suggestedQuality: 'small'
-          });
-          lastSongIdRef.current = songToPlay;
-          playerRef.current.unMute();
-          playerRef.current.setVolume(Math.floor((volumeRef.current || 0.8) * 100));
-          playerRef.current.playVideo();
+          if (songToPlay) {
+            if (songToPlay !== lastSongIdRef.current) {
+              playerRef.current.loadVideoById({
+                videoId: songToPlay,
+                startSeconds: 0,
+                suggestedQuality: 'small'
+              });
+              lastSongIdRef.current = songToPlay;
+            }
+            playerRef.current.unMute();
+            playerRef.current.setVolume(Math.floor((volumeRef.current || 0.8) * 100));
+            playerRef.current.playVideo();
+          }
         } catch (e) {}
       }
       if (silentAudioRef.current) {
@@ -381,12 +383,13 @@ export default function YouTubeAudioEngine({
         try {
           playerRef.current.seekTo(targetSeconds, true);
           playerRef.current.unMute();
+          playerRef.current.setVolume(Math.floor((volumeRef.current || 0.8) * 100));
           playerRef.current.playVideo();
         } catch (e) {}
       }
     };
 
-    // 5. Visibility & Focus Handlers: Seamlessly reload video stream with voice whenever user changes tab or returns
+    // 5. Visibility Handler: Seamlessly resume playback and restore volume when returning to tab
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
@@ -395,33 +398,21 @@ export default function YouTubeAudioEngine({
         if (silentAudioRef.current && isPlayingRef.current) {
           silentAudioRef.current.play().catch(() => {});
         }
-        if (isPlayingRef.current && currentSongRef.current?.id) {
-          // Whenever the user in mobile changes the tab or comes back: load the video just like YouTube does
-          if (reloadVideoWithVoiceRef.current) {
-            reloadVideoWithVoiceRef.current(currentTimeRef.current);
-          }
-        }
-      }
-    };
-
-    const handleWindowFocus = () => {
-      if (document.visibilityState === 'visible' && isPlayingRef.current && currentSongRef.current?.id) {
-        const state = typeof playerRef.current?.getPlayerState === 'function' ? playerRef.current.getPlayerState() : -1;
-        if (state !== 1) { // 1 is PLAYING
-          if (reloadVideoWithVoiceRef.current) {
-            reloadVideoWithVoiceRef.current(currentTimeRef.current);
-          }
+        if (isPlayingRef.current && playerRef.current && isReadyRef.current) {
+          try {
+            playerRef.current.unMute();
+            playerRef.current.setVolume(Math.floor((volumeRef.current || 0.8) * 100));
+            playerRef.current.playVideo();
+          } catch (e) {}
         }
       }
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('focus', handleWindowFocus);
     window.addEventListener('pageshow', handleVisibilityChange);
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('focus', handleWindowFocus);
       window.removeEventListener('pageshow', handleVisibilityChange);
       if (playerRef.current && typeof playerRef.current.destroy === 'function') {
         playerRef.current.destroy();
@@ -434,19 +425,21 @@ export default function YouTubeAudioEngine({
   // Track change
   useEffect(() => {
     if (playerRef.current && isReadyRef.current && currentSong?.id) {
-      try {
-        lastSongIdRef.current = currentSong.id;
-        playerRef.current.loadVideoById({
-          videoId: currentSong.id,
-          startSeconds: 0,
-          suggestedQuality: 'small'
-        });
-        playerRef.current.setPlaybackQuality('small');
-        playerRef.current.unMute();
-        playerRef.current.setVolume(Math.floor(volume * 100));
-        playerRef.current.playVideo();
-      } catch (err) {
-        console.error("Error loading YouTube track:", err);
+      if (currentSong.id !== lastSongIdRef.current || currentSong.playTrigger) {
+        try {
+          lastSongIdRef.current = currentSong.id;
+          playerRef.current.loadVideoById({
+            videoId: currentSong.id,
+            startSeconds: 0,
+            suggestedQuality: 'small'
+          });
+          playerRef.current.setPlaybackQuality('small');
+          playerRef.current.unMute();
+          playerRef.current.setVolume(Math.floor(volume * 100));
+          playerRef.current.playVideo();
+        } catch (err) {
+          console.error("Error loading YouTube track:", err);
+        }
       }
     }
   }, [currentSong?.id, currentSong?.playTrigger]);
@@ -490,16 +483,10 @@ export default function YouTubeAudioEngine({
               onTimeUpdateRef.current(time);
             }
 
-            // Auto-detect stalled or muted voice while document is visible
-            if (isPlayingRef.current && document.visibilityState === 'visible' && playerRef.current) {
+            // Auto-unmute voice if player ever gets muted
+            if (isPlayingRef.current && playerRef.current) {
               try {
-                const state = typeof playerRef.current.getPlayerState === 'function' ? playerRef.current.getPlayerState() : -1;
-                if (state === 2 || state === -1) {
-                  // 2 is PAUSED, -1 is UNSTARTED -> reload video with voice just like YouTube does
-                  if (reloadVideoWithVoiceRef.current) {
-                    reloadVideoWithVoiceRef.current(currentTimeRef.current);
-                  }
-                } else if (state === 1 && typeof playerRef.current.isMuted === 'function' && playerRef.current.isMuted()) {
+                if (typeof playerRef.current.isMuted === 'function' && playerRef.current.isMuted()) {
                   playerRef.current.unMute();
                   playerRef.current.setVolume(Math.floor((volumeRef.current || 0.8) * 100));
                 }
