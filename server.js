@@ -191,6 +191,7 @@ const server = http.createServer(async (req, res) => {
     // 1. Version API
     if (pathname.includes('version')) {
       return sendJSON({
+        success: true,
         version: '2.9.14',
         maintenance: false,
         features: { '2.9.14': ['Native JavaScript API Routes', 'Live YouTube Web Search Scraper'] }
@@ -218,6 +219,7 @@ const server = http.createServer(async (req, res) => {
       }
 
       return sendJSON({
+        success: true,
         token: `synctune-jwt-${Date.now()}`,
         user: userObj,
         status: 'active'
