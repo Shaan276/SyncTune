@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import CryptoJS from 'crypto-js';
 
 export const dynamic = 'force-dynamic';
 
@@ -6,6 +7,94 @@ if (!global._synctune_recommend_cache) {
   global._synctune_recommend_cache = new Map();
 }
 const recommendCache = global._synctune_recommend_cache;
+
+const DES_KEY = CryptoJS.enc.Utf8.parse('38346591');
+
+function decryptSaavnUrl(encryptedUrl) {
+  if (!encryptedUrl) return null;
+  try {
+    const decrypted = CryptoJS.DES.decrypt(
+      { ciphertext: CryptoJS.enc.Base64.parse(encryptedUrl) },
+      DES_KEY,
+      { mode: CryptoJS.mode.ECB, padding: CryptoJS.pad.Pkcs7 }
+    );
+    const url = decrypted.toString(CryptoJS.enc.Utf8);
+    if (!url || !url.startsWith('http')) return null;
+    return url.replace('_96.mp4', '_320.mp4').replace('_160.mp4', '_320.mp4');
+  } catch (e) {
+    return null;
+  }
+}
+
+function cleanHtml(str) {
+  if (!str) return '';
+  return str
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, '&')
+    .replace(/&#039;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .trim();
+}
+
+async function searchSaavn(query) {
+  try {
+    const url = `https://www.jiosaavn.com/api.php?__call=search.getResults&q=${encodeURIComponent(query)}&_format=json&_marker=0&ctx=web6dot0&api_version=4`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3500);
+
+    const res = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json'
+      },
+      signal: controller.signal
+    });
+    clearTimeout(timeout);
+
+    if (!res.ok) return [];
+    const data = await res.json();
+    const results = data.results || [];
+    const songs = [];
+
+    for (const item of results) {
+      if (item.type !== 'song' && item.type) continue;
+      const encryptedUrl = item.more_info?.encrypted_media_url;
+      const audioUrl = decryptSaavnUrl(encryptedUrl);
+      if (!audioUrl) continue;
+
+      const title = cleanHtml(item.title);
+      let artist = cleanHtml(
+        item.more_info?.artistMap?.primary_artists?.[0]?.name ||
+        item.more_info?.music ||
+        item.subtitle ||
+        'Artist'
+      );
+      if (artist.includes('-')) artist = artist.split('-')[0].trim();
+
+      const duration = parseInt(item.more_info?.duration || '210', 10);
+      let thumbnail = item.image || '';
+      if (thumbnail.includes('150x150')) {
+        thumbnail = thumbnail.replace('150x150', '500x500');
+      }
+
+      songs.push({
+        id: item.id || `saavn_${Math.random().toString(36).substring(7)}`,
+        title: title || 'Music Track',
+        artist: artist || 'Artist',
+        duration: isNaN(duration) ? 210 : duration,
+        thumbnail,
+        audioUrl
+      });
+
+      if (songs.length >= 10) break;
+    }
+
+    return songs;
+  } catch (e) {
+    return [];
+  }
+}
 
 const RECORD_LABELS = [
   't-series', 'tseries', 'zee music', 'sony music', 'speed records', 'yrf', 'tips official',
@@ -160,26 +249,36 @@ export async function GET(request) {
   // 1. Extract real artists
   const artists = extractArtists(title, rawArtist);
 
-  // 2. Fetch Strictly Same Artist Tracks
+  // 2. Fetch Strictly Same Artist Tracks (Prioritizing direct 320kbps CDN tracks)
   let artistTracks = [];
   const artistSeen = new Set();
   if (videoId) artistSeen.add(videoId);
 
   for (const art of artists.slice(0, 3)) {
-    const artSongs = await fetchFromYouTube(`${art} songs official audio`, videoId);
-    for (const song of artSongs) {
+    const cdnSongs = await searchSaavn(art);
+    for (const song of cdnSongs) {
       if (!artistSeen.has(song.id)) {
-        // Verify artist is strictly present in title or channel
-        const checkStr = `${song.title} ${song.artist}`.toLowerCase();
-        if (checkStr.includes(art.toLowerCase())) {
-          artistSeen.add(song.id);
-          artistTracks.push(song);
+        artistSeen.add(song.id);
+        artistTracks.push(song);
+      }
+    }
+  }
+
+  if (artistTracks.length < 5) {
+    for (const art of artists.slice(0, 3)) {
+      const artSongs = await fetchFromYouTube(`${art} songs official audio`, videoId);
+      for (const song of artSongs) {
+        if (!artistSeen.has(song.id)) {
+          const checkStr = `${song.title} ${song.artist}`.toLowerCase();
+          if (checkStr.includes(art.toLowerCase())) {
+            artistSeen.add(song.id);
+            artistTracks.push(song);
+          }
         }
       }
     }
   }
 
-  // If still need more artist tracks and we have at least one artist, do broader search
   if (artistTracks.length < 5 && artists.length > 0) {
     const primaryArtist = artists[0];
     const moreSongs = await fetchFromYouTube(`${primaryArtist} top hits songs`, videoId);
@@ -191,21 +290,31 @@ export async function GET(request) {
     }
   }
 
-  // 3. Fetch Same Taste & Genre Tracks (Vibe match, excluding primary artist)
+  // 3. Fetch Same Taste & Genre Tracks (Vibe match, direct CDN priority)
   const cleanTitle = title.split(/[|\-–—]/)[0]?.replace(/\([^)]*\)/g, '').trim() || title;
-  const genreQuery = artists.length > 0
-    ? `${artists[0]} radio mix similar songs`
-    : `${cleanTitle} similar vibe songs`;
-
-  const genreRaw = await fetchFromYouTube(genreQuery, videoId);
   const genreTracks = [];
   const genreSeen = new Set();
   if (videoId) genreSeen.add(videoId);
 
-  for (const song of genreRaw) {
-    if (!genreSeen.has(song.id)) {
+  const cdnGenre = await searchSaavn(cleanTitle);
+  for (const song of cdnGenre) {
+    if (!genreSeen.has(song.id) && !artistSeen.has(song.id)) {
       genreSeen.add(song.id);
       genreTracks.push(song);
+    }
+  }
+
+  if (genreTracks.length < 5) {
+    const genreQuery = artists.length > 0
+      ? `${artists[0]} radio mix similar songs`
+      : `${cleanTitle} similar vibe songs`;
+
+    const genreRaw = await fetchFromYouTube(genreQuery, videoId);
+    for (const song of genreRaw) {
+      if (!genreSeen.has(song.id)) {
+        genreSeen.add(song.id);
+        genreTracks.push(song);
+      }
     }
   }
 

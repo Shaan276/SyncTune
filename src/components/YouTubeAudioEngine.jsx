@@ -131,21 +131,15 @@ export default function YouTubeAudioEngine({
 
     if (currentSong) {
       try {
+        const artworkUrl = currentSong.thumbnail || `https://img.youtube.com/vi/${currentSong.id}/hqdefault.jpg`;
         navigator.mediaSession.metadata = new window.MediaMetadata({
           title: currentSong.title || 'SyncTune Track',
           artist: currentSong.artist || 'SyncTune Artist',
           album: 'SyncTune Audio OS',
           artwork: [
-            {
-              src: currentSong.thumbnail || `https://img.youtube.com/vi/${currentSong.id}/mqdefault.jpg`,
-              sizes: '96x96',
-              type: 'image/jpeg'
-            },
-            {
-              src: currentSong.thumbnail || `https://img.youtube.com/vi/${currentSong.id}/hqdefault.jpg`,
-              sizes: '512x512',
-              type: 'image/jpeg'
-            }
+            { src: artworkUrl, sizes: '96x96', type: 'image/jpeg' },
+            { src: artworkUrl, sizes: '256x256', type: 'image/jpeg' },
+            { src: artworkUrl, sizes: '512x512', type: 'image/jpeg' }
           ]
         });
 
@@ -202,6 +196,18 @@ export default function YouTubeAudioEngine({
             if (onSeekRef.current) onSeekRef.current(details.seekTime);
             if (window.syncTuneSeekAudio) window.syncTuneSeekAudio(details.seekTime);
           }
+        });
+        navigator.mediaSession.setActionHandler('seekforward', (details) => {
+          const skipTime = details.seekOffset || 10;
+          const current = audioRef.current?.currentTime || currentTime || 0;
+          const target = Math.min(duration || 1000, current + skipTime);
+          if (window.syncTuneSeekAudio) window.syncTuneSeekAudio(target);
+        });
+        navigator.mediaSession.setActionHandler('seekbackward', (details) => {
+          const skipTime = details.seekOffset || 10;
+          const current = audioRef.current?.currentTime || currentTime || 0;
+          const target = Math.max(0, current - skipTime);
+          if (window.syncTuneSeekAudio) window.syncTuneSeekAudio(target);
         });
 
         if ('setPositionState' in navigator.mediaSession && duration > 0) {
@@ -287,13 +293,13 @@ export default function YouTubeAudioEngine({
 
   // Global helper methods
   useEffect(() => {
-    window.syncTunePlayAudio = (songId) => {
+    window.syncTunePlayAudio = (songId, directAudioUrl = null) => {
       setUseIframeFallback(false);
       if (audioRef.current) {
         if (songId && songId !== lastSongIdRef.current) {
           lastSongIdRef.current = songId;
-          // Note the .m4a container suffix hint for iOS CoreMedia
-          audioRef.current.src = `/api/stream?id=${encodeURIComponent(songId)}.m4a`;
+          const targetSrc = directAudioUrl || (currentSong?.audioUrl) || `/api/stream?id=${encodeURIComponent(songId)}.m4a`;
+          audioRef.current.src = targetSrc;
         }
         audioRef.current.volume = volume;
         audioRef.current.play().catch(() => {});
@@ -351,7 +357,7 @@ export default function YouTubeAudioEngine({
         isReadyRef.current = false;
       }
     };
-  }, [volume]);
+  }, [volume, currentSong?.audioUrl]);
 
   // 5. Track change handler
   useEffect(() => {
@@ -362,8 +368,8 @@ export default function YouTubeAudioEngine({
       setUseIframeFallback(false);
 
       if (audioRef.current) {
-        // Formatted with .m4a suffix for iOS WebKit CoreMedia container sniffing
-        audioRef.current.src = `/api/stream?id=${encodeURIComponent(currentSong.id)}.m4a`;
+        const targetSrc = currentSong.audioUrl || `/api/stream?id=${encodeURIComponent(currentSong.id)}.m4a`;
+        audioRef.current.src = targetSrc;
         audioRef.current.volume = volume;
         if (isPlaying) {
           audioRef.current.play().catch((err) => {
@@ -372,7 +378,7 @@ export default function YouTubeAudioEngine({
         }
       }
     }
-  }, [currentSong?.id, currentSong?.playTrigger, isPlaying, volume]);
+  }, [currentSong?.id, currentSong?.audioUrl, currentSong?.playTrigger, isPlaying, volume]);
 
   // 6. Volume change
   useEffect(() => {
@@ -409,7 +415,7 @@ export default function YouTubeAudioEngine({
     <>
       {/* 
         Native HTML5 Audio element:
-        Plays direct audio stream from /api/stream?id=...m4a
+        Plays direct audio stream from Akamai CDN (SoundCloud model) or /api/stream?id=...m4a
         Rendered with active layout geometry (not display: none) so iOS WebKit and Android Blink
         never cull or suspend the element when Chrome / Safari is backgrounded.
       */}
@@ -417,11 +423,26 @@ export default function YouTubeAudioEngine({
         ref={audioRef}
         playsInline
         preload="auto"
+        crossOrigin="anonymous"
         onTimeUpdate={(e) => {
           if (!useIframeFallback && onTimeUpdateRef.current) {
             const t = e.currentTarget.currentTime;
             if (!isNaN(t)) {
               onTimeUpdateRef.current(t);
+              if (
+                typeof navigator !== 'undefined' &&
+                'mediaSession' in navigator &&
+                'setPositionState' in navigator.mediaSession &&
+                duration > 0
+              ) {
+                try {
+                  navigator.mediaSession.setPositionState({
+                    duration: Math.max(1, duration),
+                    playbackRate: isPlayingRef.current ? 1 : 0,
+                    position: Math.min(t, duration)
+                  });
+                } catch (err) {}
+              }
             }
           }
         }}

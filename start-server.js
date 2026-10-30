@@ -18,11 +18,15 @@ process.on('unhandledRejection', (reason, promise) => {
 
 let childProcess = null;
 
+const fs = require('fs');
+
 function startNext() {
-  console.log('[SyncTune Supervisor] Launching Next.js on port 9998...');
+  const hasBuild = fs.existsSync(path.join(__dirname, '.next', 'BUILD_ID'));
+  const mode = hasBuild ? 'start' : 'dev';
+  console.log(`[SyncTune Supervisor] Launching Next.js in ${mode} mode on port 9998...`);
   
   const nextBin = path.join(__dirname, 'node_modules', 'next', 'dist', 'bin', 'next');
-  childProcess = spawn(process.execPath, [nextBin, 'start', '-p', '9998'], {
+  childProcess = spawn(process.execPath, [nextBin, mode, '-p', '9998'], {
     cwd: __dirname,
     stdio: ['ignore', 'inherit', 'inherit'],
     env: process.env

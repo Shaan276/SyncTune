@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { Ytdl } from '@distube/ytdl-core';
+import CryptoJS from 'crypto-js';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,7 +14,44 @@ if (!global._synctune_stream_cache) {
 }
 const streamUrlCache = global._synctune_stream_cache;
 
+const DES_KEY = CryptoJS.enc.Utf8.parse('38346591');
+
+function decryptSaavnUrl(encryptedUrl) {
+  if (!encryptedUrl) return null;
+  try {
+    const decrypted = CryptoJS.DES.decrypt(
+      { ciphertext: CryptoJS.enc.Base64.parse(encryptedUrl) },
+      DES_KEY,
+      { mode: CryptoJS.mode.ECB, padding: CryptoJS.pad.Pkcs7 }
+    );
+    const url = decrypted.toString(CryptoJS.enc.Utf8);
+    if (!url || !url.startsWith('http')) return null;
+    return url.replace('_96.mp4', '_320.mp4').replace('_160.mp4', '_320.mp4');
+  } catch (e) {
+    return null;
+  }
+}
+
+async function getSaavnAudioUrl(pid) {
+  try {
+    const cleanPid = pid.replace(/^saavn_/, '');
+    const url = `https://www.jiosaavn.com/api.php?__call=song.getDetails&pids=${encodeURIComponent(cleanPid)}&_format=json&_marker=0&ctx=web6dot0&api_version=4`;
+    const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const song = data.songs?.[0];
+    if (song?.more_info?.encrypted_media_url) {
+      return decryptSaavnUrl(song.more_info.encrypted_media_url);
+    }
+  } catch (e) {}
+  return null;
+}
+
 async function getAudioUrl(videoId) {
+  if (videoId.startsWith('saavn_')) {
+    return await getSaavnAudioUrl(videoId);
+  }
+
   const cached = streamUrlCache.get(videoId);
   if (cached && Date.now() - cached.timestamp < 3 * 3600 * 1000) {
     return cached.url;
@@ -47,6 +85,13 @@ export async function HEAD(request) {
 
   // Strip extension hint if provided (e.g. videoId.m4a -> videoId)
   const videoId = rawId.replace(/\.(m4a|mp3|mp4|webm)$/i, '');
+
+  if (videoId.startsWith('saavn_')) {
+    const cdnUrl = await getSaavnAudioUrl(videoId);
+    if (cdnUrl) {
+      return NextResponse.redirect(cdnUrl, 307);
+    }
+  }
 
   const audioUrl = await getAudioUrl(videoId);
   if (!audioUrl) return new Response(null, { status: 502 });
@@ -85,6 +130,13 @@ export async function GET(request) {
 
   // Strip extension hint if provided (e.g. videoId.m4a -> videoId)
   const videoId = rawId.replace(/\.(m4a|mp3|mp4|webm)$/i, '');
+
+  if (videoId.startsWith('saavn_')) {
+    const cdnUrl = await getSaavnAudioUrl(videoId);
+    if (cdnUrl) {
+      return NextResponse.redirect(cdnUrl, 307);
+    }
+  }
 
   let audioUrl = await getAudioUrl(videoId);
   if (!audioUrl) {

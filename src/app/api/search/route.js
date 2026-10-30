@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import CryptoJS from 'crypto-js';
 
 export const dynamic = 'force-dynamic';
 
@@ -6,6 +7,94 @@ if (!global._synctune_search_cache) {
   global._synctune_search_cache = new Map();
 }
 const searchCache = global._synctune_search_cache;
+
+const DES_KEY = CryptoJS.enc.Utf8.parse('38346591');
+
+function decryptSaavnUrl(encryptedUrl) {
+  if (!encryptedUrl) return null;
+  try {
+    const decrypted = CryptoJS.DES.decrypt(
+      { ciphertext: CryptoJS.enc.Base64.parse(encryptedUrl) },
+      DES_KEY,
+      { mode: CryptoJS.mode.ECB, padding: CryptoJS.pad.Pkcs7 }
+    );
+    const url = decrypted.toString(CryptoJS.enc.Utf8);
+    if (!url || !url.startsWith('http')) return null;
+    return url.replace('_96.mp4', '_320.mp4').replace('_160.mp4', '_320.mp4');
+  } catch (e) {
+    return null;
+  }
+}
+
+function cleanHtml(str) {
+  if (!str) return '';
+  return str
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, '&')
+    .replace(/&#039;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .trim();
+}
+
+async function searchSaavn(query) {
+  try {
+    const url = `https://www.jiosaavn.com/api.php?__call=search.getResults&q=${encodeURIComponent(query)}&_format=json&_marker=0&ctx=web6dot0&api_version=4`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3500);
+
+    const res = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json'
+      },
+      signal: controller.signal
+    });
+    clearTimeout(timeout);
+
+    if (!res.ok) return [];
+    const data = await res.json();
+    const results = data.results || [];
+    const songs = [];
+
+    for (const item of results) {
+      if (item.type !== 'song' && item.type) continue;
+      const encryptedUrl = item.more_info?.encrypted_media_url;
+      const audioUrl = decryptSaavnUrl(encryptedUrl);
+      if (!audioUrl) continue;
+
+      const title = cleanHtml(item.title);
+      let artist = cleanHtml(
+        item.more_info?.artistMap?.primary_artists?.[0]?.name ||
+        item.more_info?.music ||
+        item.subtitle ||
+        'Artist'
+      );
+      if (artist.includes('-')) artist = artist.split('-')[0].trim();
+
+      const duration = parseInt(item.more_info?.duration || '210', 10);
+      let thumbnail = item.image || '';
+      if (thumbnail.includes('150x150')) {
+        thumbnail = thumbnail.replace('150x150', '500x500');
+      }
+
+      songs.push({
+        id: item.id || `saavn_${Math.random().toString(36).substring(7)}`,
+        title: title || 'Music Track',
+        artist: artist || 'Artist',
+        duration: isNaN(duration) ? 210 : duration,
+        thumbnail,
+        audioUrl
+      });
+
+      if (songs.length >= 15) break;
+    }
+
+    return songs;
+  } catch (e) {
+    return [];
+  }
+}
 
 function cleanArtistName(name) {
   if (!name) return 'YouTube Artist';
@@ -47,6 +136,18 @@ export async function GET(request) {
     return NextResponse.json(cached.data);
   }
 
+  // 1. Direct CDN Search (SoundCloud architecture: direct 320kbps Akamai MP4/AAC streams)
+  // Provides instant, unbuffered native playback for iOS background audio and Android shade
+  if (category !== 'mix' && category !== 'mixups') {
+    const cdnSongs = await searchSaavn(query);
+    if (cdnSongs && cdnSongs.length >= 5) {
+      const payload = { songs: cdnSongs, total: cdnSongs.length };
+      searchCache.set(cacheKey, { data: payload, timestamp: Date.now() });
+      return NextResponse.json(payload);
+    }
+  }
+
+  // 2. YouTube Search Fallback (for mixups, mashups, or rare tracks not in direct CDN)
   try {
     let searchQuery = query;
     let maxDurationSeconds = 600; // Default max 10 minutes
