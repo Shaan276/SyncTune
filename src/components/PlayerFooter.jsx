@@ -1,6 +1,6 @@
 'use client';
 import React, { useState } from 'react';
-import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, Heart, Film, ListMusic, Zap } from 'lucide-react';
+import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, Heart, ListMusic, Zap, Repeat } from 'lucide-react';
 import { formatTime } from '../lib/youtube';
 
 export default function PlayerFooter({
@@ -18,11 +18,11 @@ export default function PlayerFooter({
   history = [],
   likedSongs = [],
   onToggleLike,
-  onToggleCinema,
   queue = [],
   onToggleQueue,
   isQueueOpen,
-  activeRoom
+  isLooping = false,
+  onToggleLoop
 }) {
   const [isMuted, setIsMuted] = useState(false);
   const isLiked = currentSong && likedSongs.some((s) => s.id === currentSong.id);
@@ -68,6 +68,19 @@ export default function PlayerFooter({
       {/* Middle: Controls & Progress */}
       <div className="flex flex-col items-center gap-1.5 flex-1 max-w-xl min-w-0">
         <div className="flex items-center gap-3 sm:gap-5">
+          {/* Loop / Repeat Button */}
+          <button
+            onClick={onToggleLoop}
+            className={`p-2 rounded-xl transition-all cursor-pointer ${
+              isLooping
+                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shadow-sm'
+                : 'text-zinc-400 hover:text-white hover:bg-white/5'
+            }`}
+            title={isLooping ? 'Loop Song: ON (Click to Disable)' : 'Loop Song: OFF (Click to Enable)'}
+          >
+            <Repeat className="w-4 h-4" />
+          </button>
+
           <button
             onClick={onSkipPrev}
             disabled={history.length <= 1}
@@ -106,18 +119,6 @@ export default function PlayerFooter({
             >
               <ListMusic className="w-3.5 h-3.5" />
               <span>Queue {queue.length > 0 ? `(${queue.length})` : ''}</span>
-            </button>
-          )}
-
-          {/* Cinema Button: ONLY visible inside an active room */}
-          {Boolean(activeRoom) && onToggleCinema && (
-            <button
-              onClick={onToggleCinema}
-              className="p-2 px-2.5 rounded-xl bg-purple-500/15 text-purple-300 border border-purple-500/25 hover:bg-purple-500/25 transition-all flex items-center gap-1 text-[11px] font-bold cursor-pointer shrink-0"
-              title="Toggle Watch Video Together in Room"
-            >
-              <Film className="w-3.5 h-3.5" />
-              <span>Cinema</span>
             </button>
           )}
         </div>

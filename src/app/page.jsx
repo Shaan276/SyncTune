@@ -1,10 +1,8 @@
 'use client';
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Sidebar from '../components/Sidebar';
 import Header from '../components/Header';
 import PlayerFooter from '../components/PlayerFooter';
-import CinemaPlayer from '../components/CinemaPlayer';
-import FloatingWatchBtn from '../components/FloatingWatchBtn';
 import LiveReactionOverlay from '../components/LiveReactionOverlay';
 import AuthModal from '../components/AuthModal';
 import YouTubeAudioEngine from '../components/YouTubeAudioEngine';
@@ -32,6 +30,7 @@ export default function Home() {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(180);
   const [volume, setVolume] = useState(0.8);
+  const [isLooping, setIsLooping] = useState(false);
   const [history, setHistory] = useState([]);
   const [likedSongs, setLikedSongs] = useState([]);
   const [searchResults, setSearchResults] = useState([]);
@@ -40,7 +39,15 @@ export default function Home() {
   const [genreRecommendations, setGenreRecommendations] = useState([]);
   const [autoplayMode, setAutoplayMode] = useState('taste'); // 'taste' (default) or 'artist'
   const [isQueueOpen, setIsQueueOpen] = useState(false);
-  const [isCinemaOpen, setIsCinemaOpen] = useState(false);
+
+  const queueRef = useRef(queue);
+  queueRef.current = queue;
+  const currentSongRef = useRef(currentSong);
+  currentSongRef.current = currentSong;
+  const isLoopingRef = useRef(isLooping);
+  isLoopingRef.current = isLooping;
+  const autoplayModeRef = useRef(autoplayMode);
+  autoplayModeRef.current = autoplayMode;
 
   // Hydrate user session, history & queue from localStorage
   useEffect(() => {
@@ -84,6 +91,42 @@ export default function Home() {
     } catch (e) {}
   };
 
+  // Helper: Replenish queue to maintain exactly 10 upcoming tracks
+  const replenishQueueToTarget = useCallback(async (baseSong, currentList, targetCount = 10) => {
+    if (!baseSong) return;
+    const currentQ = currentList || queueRef.current;
+    const deficit = targetCount - currentQ.length;
+    if (deficit <= 0) return;
+
+    try {
+      const recs = await fetchLiveRecommendations(baseSong);
+      const candidates = autoplayModeRef.current === 'artist'
+        ? [...(recs.artistTracks || []), ...(recs.genreTracks || [])]
+        : [...(recs.genreTracks || []), ...(recs.artistTracks || [])];
+
+      const existingIds = new Set([baseSong.id, ...currentQ.map(s => s.id)]);
+      const newTracks = [];
+
+      for (const track of candidates) {
+        if (!existingIds.has(track.id) && (track.duration || 210) <= 600) {
+          existingIds.add(track.id);
+          newTracks.push(track);
+          if (newTracks.length >= deficit) break;
+        }
+      }
+
+      if (newTracks.length > 0) {
+        setQueue((prev) => {
+          const updated = [...prev, ...newTracks].slice(0, targetCount);
+          try {
+            localStorage.setItem('synctune_queue', JSON.stringify(updated));
+          } catch (e) {}
+          return updated;
+        });
+      }
+    } catch (err) {}
+  }, []);
+
   // Fetch live YouTube recommendations for current song (Same Artist + Same Genre)
   useEffect(() => {
     if (!currentSong) return;
@@ -95,13 +138,18 @@ export default function Home() {
         const validGenre = (recs.genreTracks || []).filter((s) => (s.duration || 210) <= 600);
         setArtistRecommendations(validArtist);
         setGenreRecommendations(validGenre);
+
+        // Auto-populate 10 upcoming songs if queue is sparse
+        if (queueRef.current.length < 10) {
+          replenishQueueToTarget(currentSong, queueRef.current, 10);
+        }
       }
     });
 
     return () => {
       active = false;
     };
-  }, [currentSong?.id, currentSong?.artist]);
+  }, [currentSong?.id, replenishQueueToTarget]);
 
   const handleSearch = async (query, category) => {
     if (!query) {
@@ -155,71 +203,68 @@ export default function Home() {
     if (typeof window !== 'undefined' && window.syncTunePlayAudio) {
       window.syncTunePlayAudio(song.id);
     }
-  }, []);
 
+    // Auto-buffer upcoming queue to 10 songs on song start
+    replenishQueueToTarget(songToPlay, queueRef.current, 10);
+  }, [replenishQueueToTarget]);
+
+  // Rolling Queue Skip Next: Pop 1, Play 1, Fetch 1 new vibe track to maintain 10 songs!
   const handleSkipNext = useCallback(() => {
-    // 1. Explicit user queue has top priority
-    if (queue.length > 0) {
-      const nextSong = queue[0];
-      const remainingQueue = queue.slice(1);
-      setQueue(remainingQueue);
-      try {
-        localStorage.setItem('synctune_queue', JSON.stringify(remainingQueue));
-      } catch (e) {}
-      handlePlaySong(nextSong);
+    // 1. Loop Check: If loop song is ON, repeat the track
+    if (isLoopingRef.current && currentSongRef.current) {
+      setCurrentTime(0);
+      if (typeof window !== 'undefined' && window.syncTuneSeekAudio) {
+        window.syncTuneSeekAudio(0);
+      }
+      if (typeof window !== 'undefined' && window.syncTunePlayAudio) {
+        window.syncTunePlayAudio(currentSongRef.current.id);
+      }
       return;
     }
 
-    // 2. Autoplay mode: 'artist' or 'taste' (taste is default)
-    if (autoplayMode === 'artist') {
-      if (artistRecommendations.length > 0) {
-        const nextSong = artistRecommendations[0];
-        setArtistRecommendations((prev) => prev.slice(1));
-        handlePlaySong(nextSong);
-        return;
-      }
-      if (genreRecommendations.length > 0) {
-        const nextSong = genreRecommendations[0];
-        setGenreRecommendations((prev) => prev.slice(1));
-        handlePlaySong(nextSong);
-        return;
-      }
-    } else {
-      if (genreRecommendations.length > 0) {
-        const nextSong = genreRecommendations[0];
-        setGenreRecommendations((prev) => prev.slice(1));
-        handlePlaySong(nextSong);
-        return;
-      }
-      if (artistRecommendations.length > 0) {
-        const nextSong = artistRecommendations[0];
-        setArtistRecommendations((prev) => prev.slice(1));
-        handlePlaySong(nextSong);
-        return;
-      }
-    }
+    const currentQ = queueRef.current;
 
-    // 3. Fallback: on-demand recommendation fetch for current song
-    if (currentSong) {
-      fetchLiveRecommendations(currentSong).then((recs) => {
-        const list = autoplayMode === 'artist'
+    // 2. Rolling 10-Song Queue:
+    if (currentQ.length > 0) {
+      const nextSong = currentQ[0];
+      const remainingQueue = currentQ.slice(1); // 9 songs remain!
+
+      handlePlaySong(nextSong);
+
+      // Fetch 1 new track of the same vibe to append to the end, keeping buffer at 10!
+      fetchLiveRecommendations(nextSong).then((recs) => {
+        const pool = autoplayModeRef.current === 'artist'
           ? [...(recs.artistTracks || []), ...(recs.genreTracks || [])]
           : [...(recs.genreTracks || []), ...(recs.artistTracks || [])];
-        const valid = list.filter((s) => s.id !== currentSong.id && (s.duration || 210) <= 600);
+
+        const existingIds = new Set([nextSong.id, ...remainingQueue.map(s => s.id)]);
+        const candidate = pool.find(s => !existingIds.has(s.id) && (s.duration || 210) <= 600) || pool[0];
+
+        const updatedQueue = candidate ? [...remainingQueue, candidate] : remainingQueue;
+        setQueue(updatedQueue);
+        try {
+          localStorage.setItem('synctune_queue', JSON.stringify(updatedQueue));
+        } catch (e) {}
+      }).catch(() => {
+        setQueue(remainingQueue);
+      });
+      return;
+    }
+
+    // 3. Fallback if queue is empty
+    if (currentSongRef.current) {
+      fetchLiveRecommendations(currentSongRef.current).then((recs) => {
+        const list = autoplayModeRef.current === 'artist'
+          ? [...(recs.artistTracks || []), ...(recs.genreTracks || [])]
+          : [...(recs.genreTracks || []), ...(recs.artistTracks || [])];
+        const valid = list.filter(s => s.id !== currentSongRef.current?.id && (s.duration || 210) <= 600);
         if (valid.length > 0) {
           handlePlaySong(valid[0]);
-          return;
+          setQueue(valid.slice(1, 10));
         }
       });
     }
-
-    // 4. Fallback to cycling previous history
-    if (history.length > 1 && currentSong) {
-      const currentIndex = history.findIndex((s) => s.id === currentSong.id);
-      const nextIndex = (currentIndex + 1) % history.length;
-      handlePlaySong(history[nextIndex]);
-    }
-  }, [queue, autoplayMode, artistRecommendations, genreRecommendations, history, currentSong, handlePlaySong]);
+  }, [handlePlaySong]);
 
   const handleSkipPrev = useCallback(() => {
     if (history.length > 1 && currentSong) {
@@ -331,7 +376,6 @@ export default function Home() {
         user={user}
         activeRoom={activeRoom}
         onCreateRoomQuick={handleQuickCreateRoom}
-        onOpenCinema={() => setIsCinemaOpen(true)}
         onOpenAuth={() => setShowAuthModal(true)}
         onLogout={handleLogout}
       />
@@ -370,7 +414,6 @@ export default function Home() {
               setActiveRoom={setActiveRoom}
               currentSong={currentSong}
               onPlaySong={handlePlaySong}
-              onOpenCinema={() => setIsCinemaOpen(true)}
             />
           )}
 
@@ -413,17 +456,16 @@ export default function Home() {
         onSkipPrev={handleSkipPrev}
         onSeek={handleSeek}
         onVolumeChange={setVolume}
-        onToggleCinema={() => setIsCinemaOpen(!isCinemaOpen)}
-        isCinemaOpen={isCinemaOpen}
         likedSongs={likedSongs}
         onToggleLike={handleToggleLike}
         queue={queue}
         onToggleQueue={() => setIsQueueOpen(!isQueueOpen)}
         isQueueOpen={isQueueOpen}
-        activeRoom={activeRoom}
+        isLooping={isLooping}
+        onToggleLoop={() => setIsLooping(!isLooping)}
       />
 
-      {/* Slide-out Queue Drawer */}
+      {/* Slide-out Queue Drawer with 10-Track Rolling Buffer */}
       <QueueDrawer
         isOpen={isQueueOpen}
         onClose={() => setIsQueueOpen(false)}
@@ -442,22 +484,6 @@ export default function Home() {
         genreRecommendations={genreRecommendations}
         autoplayMode={autoplayMode}
         setAutoplayMode={handleSetAutoplayMode}
-      />
-
-      {/* Floating Watch Together Cinema Launcher: Only rendered when in an active room */}
-      {Boolean(activeRoom) && (
-        <FloatingWatchBtn
-          isOpen={isCinemaOpen}
-          onClick={() => setIsCinemaOpen(!isCinemaOpen)}
-        />
-      )}
-
-      {/* Cinema Overlay View */}
-      <CinemaPlayer
-        isOpen={isCinemaOpen}
-        onClose={() => setIsCinemaOpen(false)}
-        currentSong={currentSong}
-        activeRoom={activeRoom}
       />
 
       {/* Real-time Emoji Reaction Overlay */}

@@ -135,22 +135,6 @@ export default function Sidebar({
                 ON ⚡~1MB
               </span>
             </div>
-
-            {/* Cinema Watch Together: only active when inside a room */}
-            {Boolean(activeRoom) && onOpenCinema && (
-              <button
-                onClick={onOpenCinema}
-                className="flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold text-zinc-400 hover:text-white hover:bg-white/5 transition-all cursor-pointer min-w-0"
-              >
-                <span className="flex items-center gap-2 min-w-0">
-                  <Tv className="w-3.5 h-3.5 text-purple-400 shrink-0" />
-                  <span className="text-[11px] truncate">Watch Video Together</span>
-                </span>
-                <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 shrink-0 ml-1">
-                  ROOM
-                </span>
-              </button>
-            )}
           </div>
         </div>
       </div>

@@ -1,6 +1,6 @@
 'use client';
 import React, { useState } from 'react';
-import { Radio, Lock, Mail, User, ArrowRight, UserPlus, LogIn, CheckCircle2 } from 'lucide-react';
+import { Radio, Lock, Mail, User, ArrowRight, UserPlus, LogIn, AlertCircle } from 'lucide-react';
 
 export default function AuthModal({ onLogin, onClose, allowClose = false }) {
   const [isRegister, setIsRegister] = useState(false);
@@ -10,14 +10,54 @@ export default function AuthModal({ onLogin, onClose, allowClose = false }) {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
+  const getLocalAccounts = () => {
+    try {
+      const stored = localStorage.getItem('synctune_registered_accounts');
+      if (stored) return JSON.parse(stored);
+    } catch (e) {}
+    // Default admin account
+    return [
+      {
+        id: 1,
+        username: 'Piyush',
+        email: 'piyushpilkhwal74@gmail.com',
+        password: 'admin',
+        role: 'admin'
+      }
+    ];
+  };
+
+  const saveLocalAccounts = (accounts) => {
+    try {
+      localStorage.setItem('synctune_registered_accounts', JSON.stringify(accounts));
+    } catch (e) {}
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
     setLoading(true);
 
     const cleanEmail = email.trim().toLowerCase();
-    const cleanUsername = isRegister ? username.trim() : (cleanEmail.split('@')[0] || 'Listener');
-    const isAdmin = cleanEmail === 'piyushpilkhwal74@gmail.com' || cleanUsername.toLowerCase() === 'piyush';
+    const cleanUsername = isRegister ? username.trim() : '';
+
+    if (!cleanEmail) {
+      setError('Please provide a valid email address.');
+      setLoading(false);
+      return;
+    }
+
+    if (!password || password.length < 3) {
+      setError('Password must be at least 3 characters long.');
+      setLoading(false);
+      return;
+    }
+
+    if (isRegister && !cleanUsername) {
+      setError('Please choose a username.');
+      setLoading(false);
+      return;
+    }
 
     try {
       const res = await fetch('/api/auth', {
@@ -33,33 +73,87 @@ export default function AuthModal({ onLogin, onClose, allowClose = false }) {
 
       const data = await res.json().catch(() => null);
 
-      if (res.ok && data && data.user) {
+      if (res.ok && data && data.success && data.user) {
+        // Sync local client accounts cache
+        const localList = getLocalAccounts();
+        if (!localList.some(a => a.email === cleanEmail)) {
+          localList.push({
+            id: data.user.id,
+            username: data.user.username,
+            email: cleanEmail,
+            password: password,
+            role: data.user.role
+          });
+          saveLocalAccounts(localList);
+        }
+
         localStorage.setItem('user', JSON.stringify(data.user));
-        localStorage.setItem('token', data.token || 'synctune-jwt-token-v3');
+        localStorage.setItem('token', data.token || `synctune-jwt-${data.user.id}`);
         onLogin(data.user);
+        setLoading(false);
         return;
-      } else if (data && data.error) {
+      }
+
+      // If server returned a business error (e.g. wrong password, email not found)
+      if (data && data.error) {
         setError(data.error);
         setLoading(false);
         return;
       }
     } catch (err) {
-      console.warn('Auth API network error, applying local session fallback:', err);
+      console.warn('Auth API network error, checking synced local credentials store:', err);
     }
 
-    // High-reliability session fallback
-    const fallbackUser = {
-      id: Date.now(),
-      username: cleanUsername || 'Listener',
-      email: cleanEmail || 'listener@synctune.app',
-      role: isAdmin ? 'admin' : 'user',
-      status: 'active'
-    };
+    // Client-side authentication check against persistent accounts
+    const localList = getLocalAccounts();
 
-    localStorage.setItem('user', JSON.stringify(fallbackUser));
-    localStorage.setItem('token', 'synctune-jwt-token-v3');
-    onLogin(fallbackUser);
-    setLoading(false);
+    if (isRegister) {
+      const exists = localList.find(a => a.email === cleanEmail);
+      if (exists) {
+        setError('An account with this email already exists. Please switch to Sign In.');
+        setLoading(false);
+        return;
+      }
+
+      const isAdmin = cleanEmail === 'piyushpilkhwal74@gmail.com' || cleanUsername.toLowerCase() === 'piyush';
+      const newAcc = {
+        id: Date.now(),
+        username: cleanUsername,
+        email: cleanEmail,
+        password: password,
+        role: isAdmin ? 'admin' : 'user'
+      };
+
+      localList.push(newAcc);
+      saveLocalAccounts(localList);
+
+      const safeUser = { id: newAcc.id, username: newAcc.username, email: newAcc.email, role: newAcc.role };
+      localStorage.setItem('user', JSON.stringify(safeUser));
+      localStorage.setItem('token', `synctune-jwt-${safeUser.id}`);
+      onLogin(safeUser);
+      setLoading(false);
+      return;
+    } else {
+      // Login check
+      const account = localList.find(a => a.email === cleanEmail || a.username.toLowerCase() === cleanEmail);
+      if (!account) {
+        setError('No account found with this email. Please click "Create New ID" to register first.');
+        setLoading(false);
+        return;
+      }
+
+      if (account.password !== password) {
+        setError('Incorrect password. Please verify and try again.');
+        setLoading(false);
+        return;
+      }
+
+      const safeUser = { id: account.id, username: account.username, email: account.email, role: account.role };
+      localStorage.setItem('user', JSON.stringify(safeUser));
+      localStorage.setItem('token', `synctune-jwt-${safeUser.id}`);
+      onLogin(safeUser);
+      setLoading(false);
+    }
   };
 
   return (
@@ -112,8 +206,9 @@ export default function AuthModal({ onLogin, onClose, allowClose = false }) {
 
         {/* Error Notification */}
         {error && (
-          <div className="p-3 rounded-xl bg-red-500/15 border border-red-500/30 text-red-300 text-xs font-semibold text-center">
-            {error}
+          <div className="p-3.5 rounded-xl bg-red-500/15 border border-red-500/40 text-red-300 text-xs font-semibold flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+            <span>{error}</span>
           </div>
         )}
 
@@ -172,7 +267,7 @@ export default function AuthModal({ onLogin, onClose, allowClose = false }) {
             disabled={loading}
             className="mt-2 py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-black flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-500/20 disabled:opacity-50 cursor-pointer"
           >
-            <span>{loading ? 'Authenticating...' : (isRegister ? 'Register & Enter SyncTune' : 'Sign In')}</span>
+            <span>{loading ? 'Verifying Credentials...' : (isRegister ? 'Register & Enter SyncTune' : 'Sign In')}</span>
             <ArrowRight className="w-4 h-4" />
           </button>
         </form>

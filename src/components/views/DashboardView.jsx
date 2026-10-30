@@ -1,7 +1,7 @@
 'use client';
 import React, { useState, useEffect } from 'react';
 import { Play, Plus, Heart, Music, Sparkles, Flame, History, Trash2, Compass, Radio, Search, Zap, Clock, ShieldCheck, ArrowRight } from 'lucide-react';
-import { getUserRecommendations, formatPlayMultiplier, formatFullDateTime, getSongListenCount, formatTime } from '../../lib/youtube';
+import { getUserRecommendations, formatPlayMultiplier, formatFullDateTime, getSongListenCount, formatTime, fetchLiveRecommendations } from '../../lib/youtube';
 
 export default function DashboardView({
   user,
@@ -20,9 +20,52 @@ export default function DashboardView({
   const [activeCategory, setActiveCategory] = useState('music');
   const [subTab, setSubTab] = useState('flow'); // 'flow', 'rooms', 'discover'
 
-  // Update recommendations whenever actual history changes
+  // Update recommendations whenever actual history changes: merges user favorites with fresh newly discovered vibe tracks
   useEffect(() => {
-    setRecommendations(getUserRecommendations(history));
+    let active = true;
+
+    if (!history || history.length === 0) {
+      setRecommendations([]);
+      return;
+    }
+
+    // 1. Get most played favorite songs from history
+    const userFavorites = getUserRecommendations(history);
+
+    // 2. Fetch fresh new recommendations based on user's recent listened songs
+    const recentSong = history[0];
+    if (recentSong && recentSong.title) {
+      fetchLiveRecommendations(recentSong).then((recs) => {
+        if (!active) return;
+        const newTracks = [...(recs.genreTracks || []), ...(recs.artistTracks || [])]
+          .filter((t) => t.id !== recentSong.id && (t.duration || 210) <= 600);
+
+        const seenIds = new Set();
+        const combined = [];
+
+        // Mix user listened tracks with new recommendations based on their music taste
+        for (const fav of userFavorites) {
+          if (!seenIds.has(fav.id)) {
+            seenIds.add(fav.id);
+            combined.push(fav);
+          }
+        }
+        for (const track of newTracks) {
+          if (!seenIds.has(track.id)) {
+            seenIds.add(track.id);
+            combined.push(track);
+          }
+        }
+
+        setRecommendations(combined.slice(0, 10));
+      });
+    } else {
+      setRecommendations(userFavorites);
+    }
+
+    return () => {
+      active = false;
+    };
   }, [history]);
 
   const handleSearchSubmit = (e) => {

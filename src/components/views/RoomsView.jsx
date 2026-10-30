@@ -443,18 +443,6 @@ export default function RoomsView({
                 <span>{copiedCode ? 'Copied!' : `Code: ${activeRoom}`}</span>
               </button>
 
-              {/* Watch Video Together inside Room */}
-              {onOpenCinema && (
-                <button
-                  onClick={onOpenCinema}
-                  className="px-3.5 py-2 rounded-xl bg-purple-500/15 border border-purple-500/30 text-purple-300 hover:bg-purple-500/25 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
-                  title="Open Watch Together Full-Screen Cinema"
-                >
-                  <Tv className="w-3.5 h-3.5 text-purple-400" />
-                  <span>Watch Video Together</span>
-                </button>
-              )}
-
               <button
                 onClick={handleLeaveRoom}
                 className="px-3.5 py-2 rounded-xl bg-red-500/15 border border-red-500/30 text-red-400 font-bold text-xs flex items-center gap-1.5 hover:bg-red-500/25 transition-colors cursor-pointer"
