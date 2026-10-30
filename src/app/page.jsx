@@ -278,7 +278,7 @@ export default function Home() {
     }
 
     if (typeof window !== 'undefined' && window.syncTunePlayAudio) {
-      window.syncTunePlayAudio(song.id, song.audioUrl);
+      window.syncTunePlayAudio(song.id, song.audioUrl, song.title, song.artist);
     }
 
     // Auto-buffer upcoming queue to 10 songs on song start
@@ -312,7 +312,7 @@ export default function Home() {
         if (roomPlaying !== isPlayingRef.current) {
           setIsPlaying(roomPlaying);
           if (roomPlaying) {
-            window.syncTunePlayAudio?.(roomSong?.id, roomSong?.audioUrl);
+            window.syncTunePlayAudio?.(roomSong?.id, roomSong?.audioUrl, roomSong?.title, roomSong?.artist);
           }
         }
 
@@ -342,7 +342,7 @@ export default function Home() {
         window.syncTuneSeekAudio(0);
       }
       if (typeof window !== 'undefined' && window.syncTunePlayAudio) {
-        window.syncTunePlayAudio(currentSongRef.current.id, currentSongRef.current.audioUrl);
+        window.syncTunePlayAudio(currentSongRef.current.id, currentSongRef.current.audioUrl, currentSongRef.current.title, currentSongRef.current.artist);
       }
       return;
     }
@@ -453,7 +453,7 @@ export default function Home() {
   const handleDirectPlay = useCallback(() => {
     setIsPlaying(true);
     if (typeof window !== 'undefined' && window.syncTunePlayAudio) {
-      window.syncTunePlayAudio(currentSongRef.current?.id, currentSongRef.current?.audioUrl);
+      window.syncTunePlayAudio(currentSongRef.current?.id, currentSongRef.current?.audioUrl, currentSongRef.current?.title, currentSongRef.current?.artist);
     }
     if (activeRoomRef.current) {
       fetch('/api/room', {
@@ -489,7 +489,7 @@ export default function Home() {
     setIsPlaying((prev) => {
       const next = !prev;
       if (next && typeof window !== 'undefined' && window.syncTunePlayAudio) {
-        window.syncTunePlayAudio(currentSongRef.current?.id, currentSongRef.current?.audioUrl);
+        window.syncTunePlayAudio(currentSongRef.current?.id, currentSongRef.current?.audioUrl, currentSongRef.current?.title, currentSongRef.current?.artist);
       }
       // Broadcast to room
       if (activeRoomRef.current) {

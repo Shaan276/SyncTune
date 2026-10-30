@@ -293,12 +293,12 @@ export default function YouTubeAudioEngine({
 
   // Global helper methods
   useEffect(() => {
-    window.syncTunePlayAudio = (songId, directAudioUrl = null) => {
+    window.syncTunePlayAudio = (songId, directAudioUrl = null, title = '', artist = '') => {
       setUseIframeFallback(false);
       if (audioRef.current) {
         if (songId && songId !== lastSongIdRef.current) {
           lastSongIdRef.current = songId;
-          const targetSrc = directAudioUrl || (currentSong?.audioUrl) || `/api/stream?id=${encodeURIComponent(songId)}.m4a`;
+          const targetSrc = directAudioUrl || (currentSong?.audioUrl) || `/api/stream?id=${encodeURIComponent(songId)}&title=${encodeURIComponent(title || currentSong?.title || '')}&artist=${encodeURIComponent(artist || currentSong?.artist || '')}`;
           audioRef.current.src = targetSrc;
         }
         audioRef.current.volume = volume;
@@ -357,7 +357,7 @@ export default function YouTubeAudioEngine({
         isReadyRef.current = false;
       }
     };
-  }, [volume, currentSong?.audioUrl]);
+  }, [volume, currentSong?.audioUrl, currentSong?.title, currentSong?.artist]);
 
   // 5. Track change handler
   useEffect(() => {
@@ -368,7 +368,7 @@ export default function YouTubeAudioEngine({
       setUseIframeFallback(false);
 
       if (audioRef.current) {
-        const targetSrc = currentSong.audioUrl || `/api/stream?id=${encodeURIComponent(currentSong.id)}.m4a`;
+        const targetSrc = currentSong.audioUrl || `/api/stream?id=${encodeURIComponent(currentSong.id)}&title=${encodeURIComponent(currentSong.title || '')}&artist=${encodeURIComponent(currentSong.artist || '')}`;
         audioRef.current.src = targetSrc;
         audioRef.current.volume = volume;
         if (isPlaying) {
@@ -378,7 +378,7 @@ export default function YouTubeAudioEngine({
         }
       }
     }
-  }, [currentSong?.id, currentSong?.audioUrl, currentSong?.playTrigger, isPlaying, volume]);
+  }, [currentSong?.id, currentSong?.audioUrl, currentSong?.title, currentSong?.artist, currentSong?.playTrigger, isPlaying, volume]);
 
   // 6. Volume change
   useEffect(() => {
@@ -415,7 +415,7 @@ export default function YouTubeAudioEngine({
     <>
       {/* 
         Native HTML5 Audio element:
-        Plays direct audio stream from Akamai CDN (SoundCloud model) or /api/stream?id=...m4a
+        Plays direct audio stream from Akamai CDN (SoundCloud model) or /api/stream?id=...
         Rendered with active layout geometry (not display: none) so iOS WebKit and Android Blink
         never cull or suspend the element when Chrome / Safari is backgrounded.
       */}
@@ -423,7 +423,6 @@ export default function YouTubeAudioEngine({
         ref={audioRef}
         playsInline
         preload="auto"
-        crossOrigin="anonymous"
         onTimeUpdate={(e) => {
           if (!useIframeFallback && onTimeUpdateRef.current) {
             const t = e.currentTarget.currentTime;
@@ -454,8 +453,7 @@ export default function YouTubeAudioEngine({
         onError={(e) => {
           const src = audioRef.current?.getAttribute('src');
           if (!src || !currentSong?.id) return;
-          console.warn('[SyncTune Native Audio] Stream error, switching to fallback:', e);
-          setUseIframeFallback(true);
+          console.warn('[SyncTune Native Audio] Stream error event:', e);
         }}
         style={{
           position: 'fixed',

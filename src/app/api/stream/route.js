@@ -47,6 +47,27 @@ async function getSaavnAudioUrl(pid) {
   return null;
 }
 
+async function searchSaavnAudioUrl(query) {
+  if (!query || !query.trim()) return null;
+  try {
+    const url = `https://www.jiosaavn.com/api.php?__call=search.getResults&q=${encodeURIComponent(query)}&_format=json&_marker=0&ctx=web6dot0&api_version=4`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3500);
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+      signal: controller.signal
+    });
+    clearTimeout(timeout);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const first = (data.results || []).find(r => r.more_info?.encrypted_media_url);
+    if (first?.more_info?.encrypted_media_url) {
+      return decryptSaavnUrl(first.more_info.encrypted_media_url);
+    }
+  } catch (e) {}
+  return null;
+}
+
 async function getAudioUrl(videoId) {
   if (videoId.startsWith('saavn_')) {
     return await getSaavnAudioUrl(videoId);
@@ -81,6 +102,19 @@ async function getAudioUrl(videoId) {
 export async function HEAD(request) {
   const { searchParams } = new URL(request.url);
   const rawId = searchParams.get('id');
+  const title = (searchParams.get('title') || '').trim();
+  const artist = (searchParams.get('artist') || '').trim();
+
+  // 1. Direct CDN lookup by title & artist
+  if (title) {
+    const cleanTitle = title.replace(/\(.*?\)/g, '').replace(/\[.*?\]/g, '').replace(/official|video|audio|lyrics|hd|full song/gi, '').trim();
+    const query = artist && !artist.toLowerCase().includes('artist') ? `${cleanTitle} ${artist}` : cleanTitle;
+    const cdnUrl = await searchSaavnAudioUrl(query);
+    if (cdnUrl) {
+      return NextResponse.redirect(cdnUrl, 307);
+    }
+  }
+
   if (!rawId) return new Response(null, { status: 400 });
 
   // Strip extension hint if provided (e.g. videoId.m4a -> videoId)
@@ -123,6 +157,18 @@ export async function HEAD(request) {
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const rawId = searchParams.get('id');
+  const title = (searchParams.get('title') || '').trim();
+  const artist = (searchParams.get('artist') || '').trim();
+
+  // 1. Direct CDN lookup by title & artist (Instant high-speed Akamai 320kbps CDN stream, SoundCloud model)
+  if (title) {
+    const cleanTitle = title.replace(/\(.*?\)/g, '').replace(/\[.*?\]/g, '').replace(/official|video|audio|lyrics|hd|full song/gi, '').trim();
+    const query = artist && !artist.toLowerCase().includes('artist') ? `${cleanTitle} ${artist}` : cleanTitle;
+    const cdnUrl = await searchSaavnAudioUrl(query);
+    if (cdnUrl) {
+      return NextResponse.redirect(cdnUrl, 307);
+    }
+  }
 
   if (!rawId) {
     return NextResponse.json({ error: 'Missing video id parameter' }, { status: 400 });
