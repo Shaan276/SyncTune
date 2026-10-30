@@ -1,8 +1,5 @@
 'use client';
-import React, { useEffect, useRef } from 'react';
-
-// 44-byte silent WAV data URI to keep mobile OS audio session active
-const SILENT_AUDIO_URI = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 
 export default function YouTubeAudioEngine({
   currentSong,
@@ -19,11 +16,16 @@ export default function YouTubeAudioEngine({
   onSkipPrev,
   onSeek
 }) {
+  const audioRef = useRef(null);
   const playerRef = useRef(null);
   const isReadyRef = useRef(false);
   const lastSongIdRef = useRef(null);
   const isPlayingRef = useRef(isPlaying);
   isPlayingRef.current = isPlaying;
+
+  const [useIframeFallback, setUseIframeFallback] = useState(false);
+  const useIframeFallbackRef = useRef(false);
+  useIframeFallbackRef.current = useIframeFallback;
 
   const onEndedRef = useRef(onEnded);
   const onTimeUpdateRef = useRef(onTimeUpdate);
@@ -34,7 +36,6 @@ export default function YouTubeAudioEngine({
   const onSkipPrevRef = useRef(onSkipPrev);
   const onSeekRef = useRef(onSeek);
 
-  const silentAudioRef = useRef(null);
   const audioContextRef = useRef(null);
   const isAudioUnlockedRef = useRef(false);
 
@@ -64,7 +65,7 @@ export default function YouTubeAudioEngine({
     onSeekRef.current = onSeek;
   }, [onSeek]);
 
-  // 1. Synchronously Unlock Audio Pipeline on User Interaction (Required for iOS Safari & Android Chrome)
+  // 1. Synchronously Unlock Audio Pipeline on User Interaction (iOS Safari & Android Chrome)
   useEffect(() => {
     const unlockAudioSession = () => {
       // 0. AudioSession API for iOS
@@ -72,12 +73,6 @@ export default function YouTubeAudioEngine({
         try {
           navigator.audioSession.type = 'playback';
         } catch (e) {}
-      }
-
-      // Unlock HTML5 Audio
-      const audio = silentAudioRef.current;
-      if (audio) {
-        audio.play().catch(() => {});
       }
 
       // Unlock Web Audio API AudioContext
@@ -99,7 +94,13 @@ export default function YouTubeAudioEngine({
         }
       } catch (e) {}
 
-      // If YouTube player is already initialized and supposed to play, ensure it is unmuted
+      // Unlock Native HTML5 Audio
+      const audio = audioRef.current;
+      if (audio && isPlayingRef.current) {
+        audio.play().catch(() => {});
+      }
+
+      // Unlock YouTube iframe fallback if active
       if (playerRef.current && isReadyRef.current && isPlayingRef.current) {
         try {
           playerRef.current.unMute();
@@ -124,10 +125,10 @@ export default function YouTubeAudioEngine({
     };
   }, [volume]);
 
-  // 2. Manage Audio Session when isPlaying changes
+  // 2. Manage Native Audio & Fallback playback when isPlaying changes
   useEffect(() => {
-    const audio = silentAudioRef.current;
-    if (audio) {
+    const audio = audioRef.current;
+    if (audio && !useIframeFallback) {
       if (isPlaying) {
         audio.play().catch(() => {});
       } else {
@@ -135,12 +136,22 @@ export default function YouTubeAudioEngine({
       }
     }
 
-    if (audioContextRef.current) {
-      if (isPlaying && audioContextRef.current.state === 'suspended') {
-        audioContextRef.current.resume().catch(() => {});
-      }
+    if (useIframeFallback && playerRef.current && isReadyRef.current) {
+      try {
+        if (isPlaying) {
+          playerRef.current.unMute();
+          playerRef.current.setVolume(Math.floor(volume * 100));
+          playerRef.current.playVideo();
+        } else {
+          playerRef.current.pauseVideo();
+        }
+      } catch (e) {}
     }
-  }, [isPlaying]);
+
+    if (audioContextRef.current && isPlaying && audioContextRef.current.state === 'suspended') {
+      audioContextRef.current.resume().catch(() => {});
+    }
+  }, [isPlaying, useIframeFallback, volume]);
 
   // 3. MediaSession API integration for Lock Screen and Notification Center
   useEffect(() => {
@@ -169,15 +180,18 @@ export default function YouTubeAudioEngine({
         navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
 
         navigator.mediaSession.setActionHandler('play', () => {
-          if (playerRef.current && isReadyRef.current) {
+          if (audioRef.current && !useIframeFallbackRef.current) {
+            audioRef.current.play().catch(() => {});
+          }
+          if (useIframeFallbackRef.current && playerRef.current && isReadyRef.current) {
             try {
               playerRef.current.unMute();
               playerRef.current.setVolume(Math.floor(volume * 100));
               playerRef.current.playVideo();
             } catch (e) {}
           }
-          if (silentAudioRef.current) {
-            silentAudioRef.current.play().catch(() => {});
+          if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
+            navigator.mediaSession.playbackState = 'playing';
           }
           if (onPlayRef.current) {
             onPlayRef.current();
@@ -187,13 +201,16 @@ export default function YouTubeAudioEngine({
         });
 
         navigator.mediaSession.setActionHandler('pause', () => {
+          if (audioRef.current) {
+            audioRef.current.pause();
+          }
           if (playerRef.current && isReadyRef.current) {
             try {
               playerRef.current.pauseVideo();
             } catch (e) {}
           }
-          if (silentAudioRef.current) {
-            silentAudioRef.current.pause();
+          if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
+            navigator.mediaSession.playbackState = 'paused';
           }
           if (onPauseRef.current) {
             onPauseRef.current();
@@ -218,7 +235,7 @@ export default function YouTubeAudioEngine({
         if ('setPositionState' in navigator.mediaSession && duration > 0) {
           navigator.mediaSession.setPositionState({
             duration: Math.max(1, duration),
-            playbackRate: 1,
+            playbackRate: isPlaying ? 1 : 0,
             position: Math.min(currentTime, duration)
           });
         }
@@ -226,7 +243,7 @@ export default function YouTubeAudioEngine({
     }
   }, [currentSong?.id, currentSong?.title, currentSong?.artist, isPlaying, duration, volume]);
 
-  // 4. Initialize YouTube IFrame API
+  // 4. Initialize YouTube IFrame API as Fallback Player
   useEffect(() => {
     if (!window.YT) {
       const tag = document.createElement('script');
@@ -260,36 +277,26 @@ export default function YouTubeAudioEngine({
           onReady: (event) => {
             isReadyRef.current = true;
             try {
+              if (typeof event.target.getIframe === 'function') {
+                const iframe = event.target.getIframe();
+                if (iframe) {
+                  iframe.setAttribute('allow', 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture');
+                  iframe.setAttribute('playsinline', '1');
+                  iframe.setAttribute('webkit-playsinline', '1');
+                }
+              }
               event.target.setPlaybackQuality('small');
               event.target.setVolume(Math.floor(volume * 100));
               event.target.unMute();
-              if (isPlayingRef.current && currentSong?.id) {
+              if (useIframeFallbackRef.current && isPlayingRef.current && currentSong?.id) {
                 event.target.playVideo();
               }
             } catch (e) {}
           },
           onStateChange: (event) => {
             if (event.data === window.YT.PlayerState.ENDED) {
-              if (onEndedRef.current) {
+              if (useIframeFallbackRef.current && onEndedRef.current) {
                 onEndedRef.current();
-              }
-            } else if (event.data === window.YT.PlayerState.PLAYING) {
-              try {
-                event.target.unMute();
-                event.target.setVolume(Math.floor(volume * 100));
-              } catch (e) {}
-            } else if (event.data === window.YT.PlayerState.PAUSED) {
-              // Mobile browser attempt to pause video when minimized/locked
-              if (isPlayingRef.current) {
-                // Instantly re-assert playback so music doesn't stop
-                setTimeout(() => {
-                  try {
-                    if (isPlayingRef.current && playerRef.current) {
-                      playerRef.current.unMute();
-                      playerRef.current.playVideo();
-                    }
-                  } catch (e) {}
-                }, 50);
               }
             }
           }
@@ -305,7 +312,16 @@ export default function YouTubeAudioEngine({
 
     // Global helper methods
     window.syncTunePlayAudio = (songId) => {
-      if (playerRef.current && isReadyRef.current) {
+      if (audioRef.current && !useIframeFallbackRef.current) {
+        if (songId && songId !== lastSongIdRef.current) {
+          lastSongIdRef.current = songId;
+          audioRef.current.src = `/api/stream?id=${encodeURIComponent(songId)}`;
+        }
+        audioRef.current.volume = volume;
+        audioRef.current.play().catch(() => {});
+      }
+
+      if (useIframeFallbackRef.current && playerRef.current && isReadyRef.current) {
         try {
           if (songId && songId !== lastSongIdRef.current) {
             playerRef.current.loadVideoById({
@@ -320,38 +336,51 @@ export default function YouTubeAudioEngine({
           playerRef.current.playVideo();
         } catch (e) {}
       }
-      if (silentAudioRef.current) {
-        silentAudioRef.current.play().catch(() => {});
-      }
+
       if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
         audioContextRef.current.resume().catch(() => {});
       }
     };
 
     window.syncTuneSeekAudio = (targetSeconds) => {
+      if (audioRef.current && !useIframeFallbackRef.current) {
+        try {
+          audioRef.current.currentTime = targetSeconds;
+          if (isPlayingRef.current) {
+            audioRef.current.play().catch(() => {});
+          }
+        } catch (e) {}
+      }
       if (playerRef.current && isReadyRef.current && typeof playerRef.current.seekTo === 'function') {
         try {
           playerRef.current.seekTo(targetSeconds, true);
-          playerRef.current.unMute();
-          playerRef.current.setVolume(Math.floor(volume * 100));
-          playerRef.current.playVideo();
+          if (useIframeFallbackRef.current && isPlayingRef.current) {
+            playerRef.current.unMute();
+            playerRef.current.setVolume(Math.floor(volume * 100));
+            playerRef.current.playVideo();
+          }
         } catch (e) {}
       }
     };
 
-    // 5. Lifecycle event handlers: NEVER pause audio on visibilitychange/pagehide
+    // Auto-resume cleanly when app returns to foreground
     const handleVisibilityChange = () => {
-      if (isPlayingRef.current && playerRef.current) {
+      if (!document.hidden && isPlayingRef.current) {
         try {
           if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
             audioContextRef.current.resume().catch(() => {});
           }
-          if (silentAudioRef.current) {
-            silentAudioRef.current.play().catch(() => {});
+          if (audioRef.current && !useIframeFallbackRef.current && audioRef.current.paused) {
+            audioRef.current.play().catch(() => {});
           }
-          playerRef.current.unMute();
-          playerRef.current.setVolume(Math.floor(volume * 100));
-          playerRef.current.playVideo();
+          if (useIframeFallbackRef.current && playerRef.current) {
+            playerRef.current.unMute();
+            playerRef.current.setVolume(Math.floor(volume * 100));
+            playerRef.current.playVideo();
+          }
+          if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
+            navigator.mediaSession.playbackState = 'playing';
+          }
         } catch (e) {}
       }
     };
@@ -368,61 +397,52 @@ export default function YouTubeAudioEngine({
         isReadyRef.current = false;
       }
     };
-  }, []);
+  }, [volume]);
 
-  // Track change
+  // 5. Track change handler
   useEffect(() => {
-    if (playerRef.current && isReadyRef.current && currentSong?.id) {
-      if (currentSong.id !== lastSongIdRef.current || currentSong.playTrigger) {
-        try {
-          lastSongIdRef.current = currentSong.id;
-          playerRef.current.loadVideoById({
-            videoId: currentSong.id,
-            startSeconds: 0,
-            suggestedQuality: 'small'
+    if (!currentSong?.id) return;
+
+    if (currentSong.id !== lastSongIdRef.current || currentSong.playTrigger) {
+      lastSongIdRef.current = currentSong.id;
+      setUseIframeFallback(false);
+
+      if (audioRef.current) {
+        audioRef.current.src = `/api/stream?id=${encodeURIComponent(currentSong.id)}`;
+        audioRef.current.volume = volume;
+        if (isPlaying) {
+          audioRef.current.play().catch((err) => {
+            console.warn('[SyncTune Audio] Direct play deferred:', err);
           });
-          playerRef.current.setPlaybackQuality('small');
-          playerRef.current.unMute();
-          playerRef.current.setVolume(Math.floor(volume * 100));
-          playerRef.current.playVideo();
-        } catch (err) {
-          console.error("Error loading YouTube track:", err);
         }
       }
-    }
-  }, [currentSong?.id, currentSong?.playTrigger, volume]);
 
-  // Play / Pause toggle
-  useEffect(() => {
-    if (playerRef.current && isReadyRef.current) {
-      try {
-        if (isPlaying) {
-          playerRef.current.unMute();
-          playerRef.current.setVolume(Math.floor(volume * 100));
-          playerRef.current.playVideo();
-        } else {
-          playerRef.current.pauseVideo();
-        }
-      } catch (err) {}
+      // Pre-cue fallback YouTube player
+      if (playerRef.current && isReadyRef.current) {
+        try {
+          playerRef.current.cueVideoById(currentSong.id);
+        } catch (e) {}
+      }
     }
-  }, [isPlaying, volume]);
+  }, [currentSong?.id, currentSong?.playTrigger, isPlaying, volume]);
 
-  // Volume change
+  // 6. Volume change
   useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.volume = Math.max(0, Math.min(1, volume));
+    }
     if (playerRef.current && isReadyRef.current) {
       try {
         playerRef.current.setVolume(Math.floor(volume * 100));
-        if (volume > 0) {
-          playerRef.current.unMute();
-        }
+        if (volume > 0) playerRef.current.unMute();
       } catch (err) {}
     }
   }, [volume]);
 
-  // Time tracking and background auto-correction loop
+  // 7. Time tracking for iframe fallback (native audio uses onTimeUpdate event directly)
   useEffect(() => {
     let interval;
-    if (isPlaying) {
+    if (isPlaying && useIframeFallback) {
       interval = setInterval(() => {
         if (playerRef.current && isReadyRef.current && typeof playerRef.current.getCurrentTime === 'function') {
           try {
@@ -430,39 +450,59 @@ export default function YouTubeAudioEngine({
             if (onTimeUpdateRef.current && !isNaN(time)) {
               onTimeUpdateRef.current(time);
             }
-
-            // Auto-resume if mobile OS attempted to pause in background
-            if (isPlayingRef.current) {
-              const state = playerRef.current.getPlayerState();
-              if (state === 2) {
-                // State 2 is PAUSED
-                playerRef.current.unMute();
-                playerRef.current.playVideo();
-              } else if (state === 1 && typeof playerRef.current.isMuted === 'function' && playerRef.current.isMuted()) {
-                playerRef.current.unMute();
-                playerRef.current.setVolume(Math.floor(volume * 100));
-              }
-            }
           } catch (e) {}
         }
       }, 500);
     }
     return () => clearInterval(interval);
-  }, [isPlaying, volume]);
+  }, [isPlaying, useIframeFallback]);
 
   return (
     <>
-      {/* Real HTML5 audio carrier element unlocked by user interaction */}
+      {/* 
+        Native HTML5 Audio element:
+        Plays direct audio stream from /api/stream?id=...
+        Mobile OS (Android & iOS) NEVER pauses direct HTML5 audio when pressing Home or locking screen!
+      */}
       <audio
-        ref={silentAudioRef}
-        src={SILENT_AUDIO_URI}
-        loop
+        ref={audioRef}
         playsInline
         preload="auto"
+        onTimeUpdate={(e) => {
+          if (!useIframeFallback && onTimeUpdateRef.current) {
+            const t = e.currentTarget.currentTime;
+            if (!isNaN(t)) {
+              onTimeUpdateRef.current(t);
+            }
+          }
+        }}
+        onEnded={() => {
+          if (!useIframeFallback && onEndedRef.current) {
+            onEndedRef.current();
+          }
+        }}
+        onError={(e) => {
+          console.warn('[SyncTune Native Audio] Stream error, seamlessly switching to fallback engine:', e);
+          setUseIframeFallback(true);
+          if (playerRef.current && isReadyRef.current && currentSong?.id) {
+            try {
+              playerRef.current.loadVideoById({
+                videoId: currentSong.id,
+                startSeconds: currentTime || 0,
+                suggestedQuality: 'small'
+              });
+              playerRef.current.unMute();
+              playerRef.current.setVolume(Math.floor(volume * 100));
+              if (isPlayingRef.current) {
+                playerRef.current.playVideo();
+              }
+            } catch (err) {}
+          }
+        }}
         style={{ display: 'none' }}
       />
 
-      {/* Styled with scale(0.001) so browser and YouTube detect normal dimensions without auto-pause */}
+      {/* Backup YouTube Iframe Engine container */}
       <div
         style={{
           position: 'fixed',
@@ -473,7 +513,8 @@ export default function YouTubeAudioEngine({
           transform: 'scale(0.001)',
           transformOrigin: 'bottom right',
           pointerEvents: 'none',
-          zIndex: 1
+          zIndex: 1,
+          opacity: useIframeFallback ? 1 : 0.001
         }}
       >
         <div id="synctune-ultra-low-audio-engine" />

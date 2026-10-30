@@ -10,13 +10,15 @@
     "serve": "node start-server.js"
   },
   "dependencies": {
+    "@distube/ytdl-core": "^5.2.0",
     "@supabase/supabase-js": "^2.45.0",
     "clsx": "^2.1.1",
     "lucide-react": "^0.428.0",
     "next": "^14.2.5",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "tailwind-merge": "^2.4.0"
+    "tailwind-merge": "^2.4.0",
+    "youtubei.js": "^18.3.0"
   },
   "devDependencies": {
     "autoprefixer": "^10.4.20",
