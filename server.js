@@ -400,14 +400,6 @@ const server = http.createServer(async (req, res) => {
       });
     }
 
-        // 8. Recommend API
-    if (pathname.includes('recommend')) {
-      const videoId = searchParams.get('videoId') || 'hT_nvWreIhg';
-      const title = searchParams.get('title') || 'One Love';
-      const artist = searchParams.get('artist') || 'Shubh';
-      const songs = getCuratedFallbackSongs(artist).filter(s => s.id !== videoId);
-      return sendJSON({ success: true, recommendations: songs, songs });
-    }
 
     // Default API Fallback
     return sendJSON({ success: true });
