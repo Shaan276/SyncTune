@@ -2,20 +2,29 @@ import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 
-// In-memory global store for App Router serverless runtime - Starts CLEAN (No fake data)
+// In-memory global store for rooms
 if (!global._synctune_rooms) {
   global._synctune_rooms = {};
 }
 
 const roomsStore = global._synctune_rooms;
 
+function generateUniqueCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 4; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return `SYNC-${code}`;
+}
+
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const action = searchParams.get('action') || 'list';
-  const code = (searchParams.get('code') || '').toUpperCase();
+  const code = (searchParams.get('code') || '').toUpperCase().trim();
 
+  // 1. List Public Rooms
   if (action === 'list') {
-    // Only return PUBLIC rooms in the discovery list (private rooms are hidden)
     const list = Object.values(roomsStore)
       .filter((r) => !r.isPrivate)
       .map((r) => ({
@@ -30,6 +39,7 @@ export async function GET(request) {
     return NextResponse.json({ success: true, rooms: list });
   }
 
+  // 2. Get specific room status
   if (action === 'get' && code) {
     const room = roomsStore[code];
     if (!room) {
@@ -40,8 +50,9 @@ export async function GET(request) {
       room,
       members: room.members || [],
       currentSong: room.currentSong,
-      isPlaying: room.isPlaying,
-      currentTime: room.currentTime,
+      isPlaying: Boolean(room.isPlaying),
+      currentTime: room.currentTime || 0,
+      lastUpdated: room.lastUpdated || Date.now(),
       chats: room.chats || [],
       queueVotes: room.queueVotes || {},
       isPrivate: Boolean(room.isPrivate)
@@ -55,54 +66,85 @@ export async function POST(request) {
   try {
     const body = await request.json().catch(() => ({}));
     const action = body.action || 'join';
-    const code = (body.code || 'ROOM1').toUpperCase().trim();
     const user = body.user || { id: Date.now(), username: body.username || 'Listener' };
     const isPrivate = Boolean(body.isPrivate);
 
-    // 1. Create or Join Room
-    if (action === 'join' || action === 'create') {
-      if (!roomsStore[code]) {
-        // Create new room dynamically
-        roomsStore[code] = {
-          code,
-          host_name: user.username || 'Host',
-          host_id: user.id,
-          isPrivate,
-          members: [
-            { id: user.id, username: user.username, isHost: true, isOnline: true }
-          ],
-          currentSong: null,
-          isPlaying: false,
-          currentTime: 0,
-          lastUpdated: Date.now(),
-          chats: [],
-          queueVotes: {}
-        };
-      } else {
-        // Joining existing room
-        const room = roomsStore[code];
-        const existingMember = room.members.find((m) => m.id === user.id);
-        if (!existingMember) {
-          room.members.push({
-            id: user.id,
-            username: user.username,
-            isHost: false,
-            isOnline: true
-          });
+    // CREATE ROOM
+    if (action === 'create') {
+      let code = (body.code || '').toUpperCase().trim();
+      if (!code || roomsStore[code]) {
+        code = generateUniqueCode();
+        while (roomsStore[code]) {
+          code = generateUniqueCode();
         }
       }
 
+      roomsStore[code] = {
+        code,
+        host_name: user.username || 'Host',
+        host_id: user.id,
+        isPrivate,
+        members: [
+          { id: user.id, username: user.username, isHost: true, isOnline: true }
+        ],
+        currentSong: null,
+        isPlaying: false,
+        currentTime: 0,
+        lastUpdated: Date.now(),
+        chats: [],
+        queueVotes: {}
+      };
+
       return NextResponse.json({
         success: true,
+        code,
         room: roomsStore[code],
         members: roomsStore[code].members
       });
     }
 
-    // 2. Play Song in Room
-    if (action === 'play') {
+    // JOIN ROOM
+    if (action === 'join') {
+      const code = (body.code || '').toUpperCase().trim();
+      if (!code) {
+        return NextResponse.json({ success: false, error: 'Please enter a room code.' }, { status: 400 });
+      }
+
       const room = roomsStore[code];
-      if (room && body.song) {
+      if (!room) {
+        return NextResponse.json({ success: false, error: `Room "${code}" not found. Please verify the code.` }, { status: 404 });
+      }
+
+      const existingMember = room.members.find((m) => m.id === user.id);
+      if (!existingMember) {
+        room.members.push({
+          id: user.id,
+          username: user.username,
+          isHost: false,
+          isOnline: true
+        });
+      }
+
+      return NextResponse.json({
+        success: true,
+        code,
+        room,
+        members: room.members,
+        currentSong: room.currentSong,
+        isPlaying: room.isPlaying,
+        currentTime: room.currentTime
+      });
+    }
+
+    const code = (body.code || '').toUpperCase().trim();
+    const room = roomsStore[code];
+    if (!room) {
+      return NextResponse.json({ success: false, error: 'Room not found' }, { status: 404 });
+    }
+
+    // PLAY SONG IN ROOM
+    if (action === 'play') {
+      if (body.song) {
         room.currentSong = body.song;
         room.isPlaying = true;
         room.currentTime = body.currentTime || 0;
@@ -111,31 +153,26 @@ export async function POST(request) {
       }
     }
 
-    // 3. Pause / Resume Playback in Room
+    // PAUSE / RESUME IN ROOM
     if (action === 'pause' || action === 'resume') {
-      const room = roomsStore[code];
-      if (room) {
-        room.isPlaying = action === 'resume';
-        room.currentTime = body.currentTime || room.currentTime;
-        room.lastUpdated = Date.now();
-        return NextResponse.json({ success: true, room });
+      room.isPlaying = action === 'resume';
+      if (body.currentTime !== undefined) {
+        room.currentTime = body.currentTime;
       }
+      room.lastUpdated = Date.now();
+      return NextResponse.json({ success: true, room });
     }
 
-    // 4. Seek Audio / Video in Room
+    // SEEK IN ROOM
     if (action === 'seek') {
-      const room = roomsStore[code];
-      if (room) {
-        room.currentTime = body.currentTime || 0;
-        room.lastUpdated = Date.now();
-        return NextResponse.json({ success: true, room });
-      }
+      room.currentTime = body.currentTime || 0;
+      room.lastUpdated = Date.now();
+      return NextResponse.json({ success: true, room });
     }
 
-    // 5. Chat message
+    // CHAT MESSAGE IN ROOM
     if (action === 'chat') {
-      const room = roomsStore[code];
-      if (room && body.message) {
+      if (body.message) {
         const chatItem = {
           id: Date.now(),
           sender: user.username || 'Listener',
@@ -148,28 +185,24 @@ export async function POST(request) {
       }
     }
 
-    // 6. Upvote queue track
+    // UPVOTE IN ROOM
     if (action === 'upvote') {
-      const room = roomsStore[code];
-      if (room && body.songId) {
+      if (body.songId) {
         room.queueVotes[body.songId] = (room.queueVotes[body.songId] || 0) + 1;
         return NextResponse.json({ success: true, votes: room.queueVotes });
       }
     }
 
-    // 7. Leave room
+    // LEAVE ROOM
     if (action === 'leave') {
-      const room = roomsStore[code];
-      if (room) {
-        room.members = room.members.filter((m) => m.id !== user.id);
-        if (room.members.length === 0) {
-          delete roomsStore[code];
-        }
-        return NextResponse.json({ success: true });
+      room.members = room.members.filter((m) => m.id !== user.id);
+      if (room.members.length === 0) {
+        delete roomsStore[code];
       }
+      return NextResponse.json({ success: true });
     }
 
-    return NextResponse.json({ success: true, room: roomsStore[code] });
+    return NextResponse.json({ success: true, room });
   } catch (err) {
     console.error("Room API Error:", err);
     return NextResponse.json({ success: false, error: 'Internal Server Error' }, { status: 500 });

@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Play, Plus, Heart, Music, Sparkles, Flame, History, Trash2, Compass, Radio, Search, Zap, Clock, ShieldCheck, ArrowRight } from 'lucide-react';
 import { getUserRecommendations, formatPlayMultiplier, formatFullDateTime, getSongListenCount, formatTime, fetchLiveRecommendations } from '../../lib/youtube';
 
@@ -19,6 +19,7 @@ export default function DashboardView({
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState('music');
   const [subTab, setSubTab] = useState('flow'); // 'flow', 'rooms', 'discover'
+  const searchInputRef = useRef(null);
 
   // Update recommendations whenever actual history changes: merges user favorites with fresh newly discovered vibe tracks
   useEffect(() => {
@@ -280,18 +281,22 @@ export default function DashboardView({
         </div>
 
         <form onSubmit={handleSearchSubmit} className="flex flex-col gap-3">
-          <div className="flex items-center gap-3 px-4 py-2.5 rounded-xl bg-[#080C14] border border-white/10 focus-within:border-emerald-500/50 transition-all">
-            <Search className="w-4 h-4 text-zinc-500" />
+          <div
+            onClick={() => searchInputRef.current?.focus()}
+            className="flex items-center gap-3 px-4 py-3 rounded-xl bg-[#080C14] border border-white/10 hover:border-white/20 focus-within:border-emerald-500/80 focus-within:ring-1 focus-within:ring-emerald-500/30 transition-all cursor-text"
+          >
+            <Search className="w-4 h-4 text-zinc-500 shrink-0 pointer-events-none" />
             <input
+              ref={searchInputRef}
               type="text"
               placeholder="Search by song name, artist (e.g. Vaaste, Arijit Singh, Shubh)..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-transparent text-xs text-white outline-none placeholder:text-zinc-500"
+              className="w-full bg-transparent text-xs sm:text-sm text-white outline-none placeholder:text-zinc-500 py-0.5 cursor-text"
             />
             <button
               type="submit"
-              className="px-4 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold text-xs transition-colors shrink-0 cursor-pointer"
+              className="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold text-xs transition-colors shrink-0 cursor-pointer shadow-md shadow-emerald-500/20 active:scale-95"
             >
               Search
             </button>

@@ -44,10 +44,18 @@ export default function Home() {
   queueRef.current = queue;
   const currentSongRef = useRef(currentSong);
   currentSongRef.current = currentSong;
+  const isPlayingRef = useRef(isPlaying);
+  isPlayingRef.current = isPlaying;
+  const currentTimeRef = useRef(currentTime);
+  currentTimeRef.current = currentTime;
   const isLoopingRef = useRef(isLooping);
   isLoopingRef.current = isLooping;
   const autoplayModeRef = useRef(autoplayMode);
   autoplayModeRef.current = autoplayMode;
+  const activeRoomRef = useRef(activeRoom);
+  activeRoomRef.current = activeRoom;
+  const userRef = useRef(user);
+  userRef.current = user;
 
   // Hydrate user session, history & queue from localStorage
   useEffect(() => {
@@ -158,14 +166,14 @@ export default function Home() {
     }
     const results = await searchYouTube(query, category);
     if (category === 'mix' || category === 'mixups') {
-      // Mixups / Mashups can be of any length as requested
       setSearchResults(results);
     } else {
       setSearchResults(results.filter((s) => (s.duration || 210) <= 600));
     }
   };
 
-  const handlePlaySong = useCallback((song) => {
+  // Play a song & synchronize with room members
+  const handlePlaySong = useCallback((song, isFromRoomSync = false) => {
     if (!song || !song.id) return;
 
     const isMixup = (song.title && (song.title.toLowerCase().includes('mashup') || song.title.toLowerCase().includes('mix') || song.title.toLowerCase().includes('remix')));
@@ -185,6 +193,21 @@ export default function Home() {
     setDuration(song.duration || 210);
 
     recordSongPlay(song);
+
+    // If active in a room and not triggered by incoming room sync, broadcast play to room!
+    if (activeRoomRef.current && !isFromRoomSync) {
+      fetch('/api/room', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'play',
+          code: activeRoomRef.current,
+          song: songToPlay,
+          currentTime: 0,
+          user: userRef.current
+        })
+      }).catch(() => {});
+    }
 
     const historyItem = {
       ...song,
@@ -207,6 +230,54 @@ export default function Home() {
     // Auto-buffer upcoming queue to 10 songs on song start
     replenishQueueToTarget(songToPlay, queueRef.current, 10);
   }, [replenishQueueToTarget]);
+
+  // Global Real-Time Room Synchronizer (Synchronizes across all devices & tabs)
+  useEffect(() => {
+    if (!activeRoom) return;
+    let isCancelled = false;
+
+    const syncRoom = async () => {
+      try {
+        const res = await fetch(`/api/room?action=get&code=${encodeURIComponent(activeRoom)}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (isCancelled || !data || !data.room) return;
+
+        const roomSong = data.room.currentSong;
+        const roomPlaying = Boolean(data.room.isPlaying);
+        const roomTime = data.room.currentTime || 0;
+
+        // 1. Synchronize Song Playback
+        if (roomSong && roomSong.id) {
+          if (!currentSongRef.current || currentSongRef.current.id !== roomSong.id) {
+            handlePlaySong(roomSong, true);
+          }
+        }
+
+        // 2. Synchronize Play / Pause State
+        if (roomPlaying !== isPlayingRef.current) {
+          setIsPlaying(roomPlaying);
+          if (roomPlaying) {
+            window.syncTunePlayAudio?.(roomSong?.id);
+          }
+        }
+
+        // 3. Drift Correction (> 4 seconds drift)
+        if (Math.abs(roomTime - currentTimeRef.current) > 4) {
+          setCurrentTime(roomTime);
+          window.syncTuneSeekAudio?.(roomTime);
+        }
+      } catch (err) {}
+    };
+
+    syncRoom();
+    const interval = setInterval(syncRoom, 1200);
+
+    return () => {
+      isCancelled = true;
+      clearInterval(interval);
+    };
+  }, [activeRoom, handlePlaySong]);
 
   // Rolling Queue Skip Next: Pop 1, Play 1, Fetch 1 new vibe track to maintain 10 songs!
   const handleSkipNext = useCallback(() => {
@@ -321,16 +392,42 @@ export default function Home() {
     setIsPlaying((prev) => {
       const next = !prev;
       if (next && typeof window !== 'undefined' && window.syncTunePlayAudio) {
-        window.syncTunePlayAudio(currentSong?.id);
+        window.syncTunePlayAudio(currentSongRef.current?.id);
+      }
+      // Broadcast to room
+      if (activeRoomRef.current) {
+        fetch('/api/room', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: next ? 'resume' : 'pause',
+            code: activeRoomRef.current,
+            currentTime: currentTimeRef.current,
+            user: userRef.current
+          })
+        }).catch(() => {});
       }
       return next;
     });
-  }, [currentSong?.id]);
+  }, []);
 
   const handleSeek = useCallback((newTime) => {
     setCurrentTime(newTime);
     if (typeof window !== 'undefined' && window.syncTuneSeekAudio) {
       window.syncTuneSeekAudio(newTime);
+    }
+    // Broadcast seek to room
+    if (activeRoomRef.current) {
+      fetch('/api/room', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'seek',
+          code: activeRoomRef.current,
+          currentTime: newTime,
+          user: userRef.current
+        })
+      }).catch(() => {});
     }
   }, []);
 
@@ -361,10 +458,23 @@ export default function Home() {
     setShowAuthModal(false);
   };
 
-  const handleQuickCreateRoom = useCallback(() => {
+  const handleQuickCreateRoom = useCallback(async () => {
     setActiveTab('rooms');
-    const newCode = 'SYNC' + Math.floor(100 + Math.random() * 900);
-    setActiveRoom(newCode);
+    try {
+      const res = await fetch('/api/room', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'create',
+          user: userRef.current,
+          isPrivate: false
+        })
+      });
+      const data = await res.json().catch(() => null);
+      if (data && data.room) {
+        setActiveRoom(data.room.code);
+      }
+    } catch (e) {}
   }, []);
 
   return (
@@ -465,7 +575,7 @@ export default function Home() {
         onToggleLoop={() => setIsLooping(!isLooping)}
       />
 
-      {/* Slide-out Queue Drawer with 10-Track Rolling Buffer */}
+      {/* Slide-out Queue Drawer with Top Autoplay Preference */}
       <QueueDrawer
         isOpen={isQueueOpen}
         onClose={() => setIsQueueOpen(false)}
@@ -480,8 +590,6 @@ export default function Home() {
         onAddToQueue={handleAddToQueue}
         onRemoveFromQueue={handleRemoveFromQueue}
         onClearQueue={handleClearQueue}
-        artistRecommendations={artistRecommendations}
-        genreRecommendations={genreRecommendations}
         autoplayMode={autoplayMode}
         setAutoplayMode={handleSetAutoplayMode}
       />

@@ -12,28 +12,23 @@ export default function QueueDrawer({
   onAddToQueue,
   onRemoveFromQueue,
   onClearQueue,
-  artistRecommendations = [],
-  genreRecommendations = [],
   autoplayMode = 'taste',
   setAutoplayMode
 }) {
   if (!isOpen) return null;
 
-  const validArtistRecs = artistRecommendations.filter(s => (s.duration || 210) <= 600);
-  const validGenreRecs = genreRecommendations.filter(s => (s.duration || 210) <= 600);
-
   return (
     <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex justify-end animate-in fade-in duration-200">
-      <div className="w-full max-w-md h-full bg-[#0B0F19] border-l border-white/5 p-6 flex flex-col gap-5 shadow-2xl overflow-hidden">
+      <div className="w-full max-w-md h-full bg-[#0B0F19] border-l border-white/5 p-5 sm:p-6 flex flex-col gap-4 shadow-2xl overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between pb-3 border-b border-white/5">
+        <div className="flex items-center justify-between pb-3 border-b border-white/5 shrink-0">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
               <ListMusic className="w-4 h-4" />
             </div>
             <div>
               <h3 className="text-sm font-black text-white">Playback Queue</h3>
-              <p className="text-[10px] text-emerald-400 font-mono">Max 10m Ultra-Low Data Tracks</p>
+              <p className="text-[10px] text-emerald-400 font-mono">10-Track Dynamic Rolling Buffer</p>
             </div>
           </div>
 
@@ -57,8 +52,49 @@ export default function QueueDrawer({
           </div>
         </div>
 
-        {/* Scrollable Content */}
-        <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-5 pr-1">
+        {/* TOP PRIORITY: Autoplay Mode Preference Selector (Same Artist vs Same Taste) */}
+        <div className="p-3 rounded-2xl bg-[#0F1626] border border-white/10 flex flex-col gap-2 shrink-0 shadow-lg">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-black text-white uppercase tracking-wider flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Autoplay Recommendation Flow</span>
+            </span>
+            <span className="text-[10px] text-emerald-400 font-mono font-bold">
+              {autoplayMode === 'taste' ? 'Vibe / Genre' : 'Same Artist'}
+            </span>
+          </div>
+
+          <div className="flex p-1 rounded-xl bg-[#080C14] border border-white/5 gap-1">
+            <button
+              type="button"
+              onClick={() => setAutoplayMode && setAutoplayMode('taste')}
+              className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                autoplayMode === 'taste'
+                  ? 'bg-emerald-500 text-black font-extrabold shadow-md'
+                  : 'text-zinc-400 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <Radio className="w-3.5 h-3.5" />
+              <span>Same Taste & Genre</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setAutoplayMode && setAutoplayMode('artist')}
+              className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                autoplayMode === 'artist'
+                  ? 'bg-cyan-500 text-black font-extrabold shadow-md'
+                  : 'text-zinc-400 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <Mic2 className="w-3.5 h-3.5" />
+              <span>Same Artist Only</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Scrollable Content: Now Playing & Upcoming Queue */}
+        <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-4 pr-1">
           {/* 1. Now Playing Card */}
           {currentSong && (
             <div className="flex flex-col gap-1.5">
@@ -75,18 +111,22 @@ export default function QueueDrawer({
                 <div className="flex flex-col min-w-0 flex-1">
                   <h4 className="text-xs font-bold text-white truncate">{currentSong.title}</h4>
                   <p className="text-[11px] text-zinc-400 truncate">{currentSong.artist}</p>
-                  <span className="text-[10px] text-emerald-400 font-mono mt-0.5">{formatTime(currentSong.duration)} (&lt;10m)</span>
+                  <span className="text-[10px] text-emerald-400 font-mono mt-0.5">{formatTime(currentSong.duration)}</span>
                 </div>
               </div>
             </div>
           )}
 
-          {/* 2. User-Specified Next Queue */}
+          {/* 2. Upcoming Rolling Buffer Queue (10 songs) */}
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-zinc-300 uppercase tracking-wider">
-                User Queue ({queue.length})
+              <span className="text-[11px] font-bold text-zinc-300 uppercase tracking-wider flex items-center gap-1.5">
+                <span>Upcoming Tracks</span>
+                <span className="px-2 py-0.2 rounded-full text-[10px] font-mono bg-emerald-500/20 text-emerald-300">
+                  {queue.length}
+                </span>
               </span>
+              <span className="text-[10px] text-zinc-500 font-mono">Auto-refilling buffer</span>
             </div>
 
             {queue.length > 0 ? (
@@ -94,10 +134,10 @@ export default function QueueDrawer({
                 {queue.map((song, index) => (
                   <div
                     key={`${song.id}-${index}`}
-                    className="p-2.5 px-3 rounded-xl bg-[#0F1626] border border-white/5 flex items-center justify-between gap-3 group hover:border-emerald-500/30 transition-all"
+                    className="p-2.5 px-3 rounded-xl bg-[#0F1626] border border-white/5 flex items-center justify-between gap-3 group hover:border-emerald-500/30 transition-all min-w-0"
                   >
                     <div className="flex items-center gap-3 min-w-0 flex-1">
-                      <span className="text-[11px] font-mono font-bold text-zinc-500 w-4">{index + 1}</span>
+                      <span className="text-[11px] font-mono font-bold text-emerald-400 w-5 shrink-0">#{index + 1}</span>
                       <img
                         src={song.thumbnail}
                         alt={song.title}
@@ -133,165 +173,11 @@ export default function QueueDrawer({
                 ))}
               </div>
             ) : (
-              <div className="p-3.5 rounded-xl bg-white/[0.02] border border-white/5 text-center text-zinc-500 text-xs italic">
-                Queue is empty. Click "+ Add to Queue" on any track.
+              <div className="p-6 rounded-xl bg-[#0F1626] border border-white/5 text-center text-zinc-500 text-xs italic">
+                Queue is buffering recommendations...
               </div>
             )}
           </div>
-
-          {/* 3. Autoplay Mode Preference Selector */}
-          <div className="flex flex-col gap-2 pt-2 border-t border-white/5">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Autoplay Preference</span>
-              </span>
-              <span className="text-[10px] text-zinc-500 font-mono">
-                {autoplayMode === 'taste' ? 'Genre Taste (Default)' : 'Same Artist'}
-              </span>
-            </div>
-
-            <div className="flex p-1 rounded-xl bg-[#080C14] border border-white/5">
-              <button
-                type="button"
-                onClick={() => setAutoplayMode && setAutoplayMode('taste')}
-                className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                  autoplayMode === 'taste'
-                    ? 'bg-emerald-500 text-black font-extrabold shadow-md'
-                    : 'text-zinc-400 hover:text-white'
-                }`}
-              >
-                <Radio className="w-3.5 h-3.5" />
-                <span>Same Taste & Genre</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setAutoplayMode && setAutoplayMode('artist')}
-                className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                  autoplayMode === 'artist'
-                    ? 'bg-cyan-500 text-black font-extrabold shadow-md'
-                    : 'text-zinc-400 hover:text-white'
-                }`}
-              >
-                <Mic2 className="w-3.5 h-3.5" />
-                <span>Same Artist Only</span>
-              </button>
-            </div>
-          </div>
-
-          {/* 4. Active Recommendation Tracks based on User Selection */}
-          {autoplayMode === 'taste' ? (
-            <div className="flex flex-col gap-2">
-              <div className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-400 uppercase tracking-wider">
-                <Radio className="w-3.5 h-3.5" />
-                <span>Up Next: Similar Genre & Taste Mix (&lt;10m)</span>
-              </div>
-
-              {validGenreRecs.length > 0 ? (
-                <div className="flex flex-col gap-2">
-                  {validGenreRecs.slice(0, 6).map((song) => (
-                    <div
-                      key={song.id}
-                      className="p-2.5 px-3 rounded-xl bg-[#0F1626] border border-white/5 flex items-center justify-between gap-3 group hover:border-emerald-500/30 transition-all"
-                    >
-                      <div className="flex items-center gap-3 min-w-0 flex-1">
-                        <img
-                          src={song.thumbnail}
-                          alt={song.title}
-                          className="w-10 h-10 rounded-lg object-cover shrink-0"
-                        />
-                        <div className="flex flex-col min-w-0 flex-1">
-                          <h4 className="text-xs font-bold text-white truncate group-hover:text-emerald-300 transition-colors">
-                            {song.title}
-                          </h4>
-                          <p className="text-[11px] text-zinc-400 truncate">{song.artist} • {formatTime(song.duration)}</p>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        {onAddToQueue && (
-                          <button
-                            onClick={() => onAddToQueue(song)}
-                            className="p-2 rounded-lg bg-white/10 text-white hover:bg-white/20 transition-colors cursor-pointer"
-                            title="Add to Queue"
-                          >
-                            <Plus className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                        <button
-                          onClick={() => onPlaySong(song)}
-                          className="p-2 rounded-lg bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 transition-colors cursor-pointer"
-                          title="Play Track"
-                        >
-                          <Play className="w-3.5 h-3.5 fill-current ml-0.5" />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="p-3 rounded-xl bg-white/[0.02] text-center text-zinc-500 text-xs italic">
-                  Loading genre & taste recommendations...
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="flex flex-col gap-2">
-              <div className="flex items-center gap-1.5 text-[11px] font-bold text-cyan-400 uppercase tracking-wider">
-                <Mic2 className="w-3.5 h-3.5" />
-                <span>Up Next: More by {currentSong?.artist || 'Same Artist'} (&lt;10m)</span>
-              </div>
-
-              {validArtistRecs.length > 0 ? (
-                <div className="flex flex-col gap-2">
-                  {validArtistRecs.slice(0, 6).map((song) => (
-                    <div
-                      key={song.id}
-                      className="p-2.5 px-3 rounded-xl bg-[#0F1626] border border-white/5 flex items-center justify-between gap-3 group hover:border-cyan-500/30 transition-all"
-                    >
-                      <div className="flex items-center gap-3 min-w-0 flex-1">
-                        <img
-                          src={song.thumbnail}
-                          alt={song.title}
-                          className="w-10 h-10 rounded-lg object-cover shrink-0"
-                        />
-                        <div className="flex flex-col min-w-0 flex-1">
-                          <h4 className="text-xs font-bold text-white truncate group-hover:text-cyan-300 transition-colors">
-                            {song.title}
-                          </h4>
-                          <p className="text-[11px] text-zinc-400 truncate">{song.artist} • {formatTime(song.duration)}</p>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        {onAddToQueue && (
-                          <button
-                            onClick={() => onAddToQueue(song)}
-                            className="p-2 rounded-lg bg-white/10 text-white hover:bg-white/20 transition-colors cursor-pointer"
-                            title="Add to Queue"
-                          >
-                            <Plus className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                        <button
-                          onClick={() => onPlaySong(song)}
-                          className="p-2 rounded-lg bg-cyan-500/20 text-cyan-300 hover:bg-cyan-500/30 transition-colors cursor-pointer"
-                          title="Play Track"
-                        >
-                          <Play className="w-3.5 h-3.5 fill-current ml-0.5" />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="p-3 rounded-xl bg-white/[0.02] text-center text-zinc-500 text-xs italic">
-                  Loading same artist tracks...
-                </div>
-              )}
-            </div>
-          )}
         </div>
       </div>
     </div>

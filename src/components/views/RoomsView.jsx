@@ -1,7 +1,6 @@
 'use client';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Radio, Plus, MessageSquare, ThumbsUp, Users, Play, LogOut, Search, Tv, Sparkles, Zap, ArrowRight, Copy, Check, Lock, Globe } from 'lucide-react';
-import { supabase } from '../../lib/supabaseClient';
+import { Radio, Plus, MessageSquare, ThumbsUp, Users, Play, LogOut, Search, Sparkles, Zap, ArrowRight, Copy, Check, Lock, Globe } from 'lucide-react';
 import { searchYouTube, fetchLiveRecommendations, formatTime } from '../../lib/youtube';
 
 export default function RoomsView({
@@ -9,10 +8,8 @@ export default function RoomsView({
   activeRoom,
   setActiveRoom,
   currentSong,
-  onPlaySong,
-  onOpenCinema
+  onPlaySong
 }) {
-  // Real active rooms list (starts CLEAN - No fake data)
   const [rooms, setRooms] = useState([]);
   const [inputCode, setInputCode] = useState('');
   const [copiedCode, setCopiedCode] = useState(false);
@@ -20,6 +17,7 @@ export default function RoomsView({
   const [roomSearchQuery, setRoomSearchQuery] = useState('');
   const [roomSearchResults, setRoomSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [joinError, setJoinError] = useState('');
 
   const [chatMsg, setChatMsg] = useState('');
   const [chats, setChats] = useState([]);
@@ -30,6 +28,7 @@ export default function RoomsView({
   const [roomHost, setRoomHost] = useState('');
   const [roomIsPrivate, setRoomIsPrivate] = useState(false);
 
+  const roomSearchInputRef = useRef(null);
   const activeRoomRef = useRef(activeRoom);
   activeRoomRef.current = activeRoom;
 
@@ -46,7 +45,7 @@ export default function RoomsView({
 
   useEffect(() => {
     fetchActiveRooms();
-    const interval = setInterval(fetchActiveRooms, 5000);
+    const interval = setInterval(fetchActiveRooms, 3000);
     return () => clearInterval(interval);
   }, [fetchActiveRooms]);
 
@@ -66,6 +65,7 @@ export default function RoomsView({
           if (data.chats) setChats(data.chats);
           if (data.queueVotes) setQueueVotes(data.queueVotes);
 
+          // If a song is actively playing in the room and differs from local
           if (data.currentSong && data.currentSong.id && (!currentSong || currentSong.id !== data.currentSong.id)) {
             if (onPlaySong) {
               onPlaySong(data.currentSong);
@@ -76,41 +76,77 @@ export default function RoomsView({
     } catch (e) {}
   }, [currentSong, onPlaySong]);
 
-  // 3. Guaranteed Room Creation (with Public/Private choice)
-  const handleCreateNewRoom = () => {
-    const generatedCode = 'SYNC' + Math.floor(100 + Math.random() * 900);
-    handleJoinOrCreateRoom(generatedCode, isPrivateMode);
-  };
+  useEffect(() => {
+    if (!activeRoom) return;
+    syncRoomState(activeRoom);
+    const pollTimer = setInterval(() => syncRoomState(activeRoom), 1500);
+    return () => clearInterval(pollTimer);
+  }, [activeRoom, syncRoomState]);
 
-  // 4. Join / Create Room Handler
-  const handleJoinOrCreateRoom = async (codeToJoin, makePrivate = false) => {
-    const rawCode = (codeToJoin || inputCode).toUpperCase().trim();
-    const code = rawCode || ('SYNC' + Math.floor(100 + Math.random() * 900));
+  // 3. Create Room Handler (Guaranteed unique code & zero duplicates)
+  const handleCreateNewRoom = async () => {
     const currentUser = user || { id: Date.now(), username: 'Listener' };
-
-    setActiveRoom(code);
-    setInputCode('');
-    setRoomIsPrivate(makePrivate);
-
-    setMembers([
-      { id: currentUser.id, username: currentUser.username, isHost: true, isOnline: true }
-    ]);
-    setRoomHost(currentUser.username);
-
     try {
-      await fetch('/api/room', {
+      const res = await fetch('/api/room', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'create',
-          code,
           user: currentUser,
-          isPrivate: makePrivate
+          isPrivate: isPrivateMode
         })
       });
-    } catch (err) {}
 
-    fetchActiveRooms();
+      const data = await res.json().catch(() => null);
+      if (res.ok && data && data.success && data.room) {
+        setActiveRoom(data.room.code);
+        setRoomHost(data.room.host_name);
+        setMembers(data.members || [{ id: currentUser.id, username: currentUser.username, isHost: true }]);
+        setRoomIsPrivate(isPrivateMode);
+        fetchActiveRooms();
+      }
+    } catch (err) {
+      console.error("Create room error:", err);
+    }
+  };
+
+  // 4. Join Room Handler (Instantly joins without duplicate room creation)
+  const handleJoinRoom = async (codeToJoin) => {
+    setJoinError('');
+    const rawCode = (codeToJoin || inputCode).toUpperCase().trim();
+    if (!rawCode) return;
+
+    const currentUser = user || { id: Date.now(), username: 'Listener' };
+
+    try {
+      const res = await fetch('/api/room', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'join',
+          code: rawCode,
+          user: currentUser
+        })
+      });
+
+      const data = await res.json().catch(() => null);
+      if (res.ok && data && data.success && data.room) {
+        setActiveRoom(data.room.code);
+        setInputCode('');
+        setRoomHost(data.room.host_name);
+        setMembers(data.members || []);
+        setRoomIsPrivate(Boolean(data.room.isPrivate));
+
+        // Immediately start listening if host is playing a track!
+        if (data.currentSong && onPlaySong) {
+          onPlaySong(data.currentSong);
+        }
+      } else {
+        setJoinError(data?.error || `Room "${rawCode}" does not exist.`);
+      }
+    } catch (err) {
+      setJoinError('Network error joining room.');
+    }
   };
 
   // 5. Room Leave Handler
@@ -138,7 +174,7 @@ export default function RoomsView({
     fetchActiveRooms();
   };
 
-  // 6. Play song inside room & broadcast
+  // 6. Play song inside room & sync
   const handlePlaySongInRoom = async (song) => {
     if (!song) return;
     onPlaySong(song);
@@ -156,52 +192,10 @@ export default function RoomsView({
           })
         });
       } catch (e) {}
-
-      const channel = supabase.channel(`room-events-${activeRoom}`);
-      channel.send({
-        type: 'broadcast',
-        event: 'sync_playback',
-        payload: { currentSong: song, isPlaying: true, currentTime: 0 }
-      });
     }
   };
 
-  // 7. Supabase Realtime Channel
-  useEffect(() => {
-    if (!activeRoom) return;
-
-    syncRoomState(activeRoom);
-    const pollTimer = setInterval(() => syncRoomState(activeRoom), 2500);
-
-    const channel = supabase.channel(`room-events-${activeRoom}`);
-
-    channel
-      .on('broadcast', { event: 'sync_playback' }, ({ payload }) => {
-        if (payload?.currentSong && onPlaySong) {
-          onPlaySong(payload.currentSong);
-        }
-      })
-      .on('broadcast', { event: 'new_chat' }, ({ payload }) => {
-        setChats((prev) => [...prev, payload]);
-      })
-      .on('broadcast', { event: 'queue_upvote' }, ({ payload }) => {
-        setQueueVotes((prev) => ({
-          ...prev,
-          [payload.songId]: (prev[payload.songId] || 0) + 1
-        }));
-      })
-      .on('broadcast', { event: 'room_reaction' }, ({ payload }) => {
-        triggerLocalReaction(payload.emoji, payload.username);
-      })
-      .subscribe();
-
-    return () => {
-      clearInterval(pollTimer);
-      supabase.removeChannel(channel);
-    };
-  }, [activeRoom, onPlaySong, syncRoomState]);
-
-  // 8. Dynamic recommendations for the room based on currently playing song
+  // 7. Dynamic recommendations for the room based on currently playing song
   useEffect(() => {
     if (!currentSong) {
       setRoomRecommendations([]);
@@ -223,18 +217,18 @@ export default function RoomsView({
     };
   }, [currentSong?.id, currentSong?.artist]);
 
-  // 9. Inside room search
+  // 8. Inside room search
   const handleRoomSearch = async (e) => {
     e.preventDefault();
     if (!roomSearchQuery.trim()) return;
 
     setIsSearching(true);
     const results = await searchYouTube(roomSearchQuery.trim(), 'music');
-    setRoomSearchResults(results.filter((s) => (s.duration || 210) <= 600).slice(0, 5));
+    setRoomSearchResults(results.filter((s) => (s.duration || 210) <= 600).slice(0, 6));
     setIsSearching(false);
   };
 
-  // 10. Chat send
+  // 9. Chat send
   const handleSendChat = (e) => {
     e.preventDefault();
     if (!chatMsg.trim() || !activeRoom) return;
@@ -249,13 +243,6 @@ export default function RoomsView({
 
     setChats((prev) => [...prev, chatItem]);
     setChatMsg('');
-
-    const channel = supabase.channel(`room-events-${activeRoom}`);
-    channel.send({
-      type: 'broadcast',
-      event: 'new_chat',
-      payload: chatItem
-    });
 
     try {
       fetch('/api/room', {
@@ -282,16 +269,7 @@ export default function RoomsView({
   const handleSendReaction = (emoji) => {
     if (!activeRoom) return;
     const currentUser = user || { username: 'Listener' };
-    const payload = { emoji, username: currentUser.username };
-
-    const channel = supabase.channel(`room-events-${activeRoom}`);
-    channel.send({
-      type: 'broadcast',
-      event: 'room_reaction',
-      payload
-    });
-
-    triggerLocalReaction(emoji, payload.username);
+    triggerLocalReaction(emoji, currentUser.username);
   };
 
   const handleUpvote = async (song) => {
@@ -302,13 +280,6 @@ export default function RoomsView({
       ...prev,
       [songId]: (prev[songId] || 0) + 1
     }));
-
-    const channel = supabase.channel(`room-events-${activeRoom}`);
-    channel.send({
-      type: 'broadcast',
-      event: 'queue_upvote',
-      payload: { songId }
-    });
 
     try {
       await fetch('/api/room', {
@@ -413,7 +384,7 @@ export default function RoomsView({
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
-                  if (inputCode.trim()) handleJoinOrCreateRoom(inputCode.trim());
+                  if (inputCode.trim()) handleJoinRoom(inputCode.trim());
                 }}
                 className="flex items-center gap-1.5 shrink-0"
               >
@@ -421,7 +392,7 @@ export default function RoomsView({
                   type="text"
                   placeholder="Room Code..."
                   value={inputCode}
-                  onChange={(e) => setInputCode(e.target.value)}
+                  onChange={(e) => { setInputCode(e.target.value); setJoinError(''); }}
                   className="px-3 py-2 rounded-xl bg-[#080C14] border border-white/10 text-xs text-white uppercase outline-none focus:border-emerald-500/50 w-28 sm:w-32"
                 />
                 <button
@@ -455,6 +426,12 @@ export default function RoomsView({
         </div>
       </div>
 
+      {joinError && (
+        <div className="p-3 px-4 rounded-xl bg-red-500/15 border border-red-500/30 text-red-300 text-xs font-bold">
+          {joinError}
+        </div>
+      )}
+
       {/* Active Room Workspace */}
       {activeRoom ? (
         <div className="flex flex-col gap-6">
@@ -477,7 +454,7 @@ export default function RoomsView({
                         <span>{roomIsPrivate ? 'Private' : 'Public'}</span>
                       </span>
                     </div>
-                    <p className="text-xs text-zinc-400 truncate">Host: <strong className="text-white">{roomHost || user?.username || 'You'}</strong></p>
+                    <p className="text-xs text-zinc-400 truncate">Host: <strong className="text-white">{roomHost || user?.username || 'Host'}</strong></p>
                   </div>
                 </div>
 
@@ -487,20 +464,24 @@ export default function RoomsView({
                 </div>
               </div>
 
-              {/* Inside-Room Track Search Bar */}
+              {/* Inside-Room Track Search Bar (Full Click-to-Focus Area) */}
               <form onSubmit={handleRoomSearch} className="flex flex-col gap-2">
-                <div className="flex items-center gap-3 px-4 py-2.5 rounded-xl bg-[#080C14] border border-emerald-500/30 focus-within:border-emerald-400 transition-all">
-                  <Search className="w-4 h-4 text-emerald-400 shrink-0" />
+                <div
+                  onClick={() => roomSearchInputRef.current?.focus()}
+                  className="flex items-center gap-3 px-4 py-3 rounded-xl bg-[#080C14] border border-emerald-500/30 hover:border-emerald-500/60 focus-within:border-emerald-400 focus-within:ring-1 focus-within:ring-emerald-500/30 transition-all cursor-text"
+                >
+                  <Search className="w-4 h-4 text-emerald-400 shrink-0 pointer-events-none" />
                   <input
+                    ref={roomSearchInputRef}
                     type="text"
                     placeholder="Search any song to sync across room members (<10m)..."
                     value={roomSearchQuery}
                     onChange={(e) => setRoomSearchQuery(e.target.value)}
-                    className="w-full bg-transparent text-xs text-white outline-none placeholder:text-zinc-500 min-w-0"
+                    className="w-full bg-transparent text-xs sm:text-sm text-white outline-none placeholder:text-zinc-500 min-w-0 cursor-text py-0.5"
                   />
                   <button
                     type="submit"
-                    className="px-3.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold text-xs transition-colors shrink-0 cursor-pointer"
+                    className="px-3.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold text-xs transition-colors shrink-0 cursor-pointer shadow-md shadow-emerald-500/20 active:scale-95"
                   >
                     {isSearching ? 'Searching...' : 'Search Track'}
                   </button>
@@ -695,7 +676,7 @@ export default function RoomsView({
           </div>
         </div>
       ) : (
-        /* Discovery: Active Public Rooms Directory (Pure Real Rooms, No Fake Data) */
+        /* Discovery: Active Public Rooms Directory */
         <div className="flex flex-col gap-4">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-bold text-white flex items-center gap-2">
@@ -724,15 +705,15 @@ export default function RoomsView({
 
                   <div className="flex flex-col gap-1 min-w-0">
                     <h4 className="text-xs font-bold text-white truncate group-hover:text-emerald-400 transition-colors">
-                      {room.song_title || 'One Love'}
+                      {room.song_title || 'No song playing'}
                     </h4>
                     <p className="text-[11px] text-zinc-400 truncate">
-                      {room.song_artist || 'Shubh'} • Host: <strong className="text-zinc-300">{room.host_name}</strong>
+                      {room.song_artist || 'SyncTune'} • Host: <strong className="text-zinc-300">{room.host_name}</strong>
                     </p>
                   </div>
 
                   <button
-                    onClick={() => handleJoinOrCreateRoom(room.code)}
+                    onClick={() => handleJoinRoom(room.code)}
                     className="w-full py-2 rounded-xl bg-[#141C30] hover:bg-emerald-500 text-zinc-300 hover:text-black font-extrabold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer"
                   >
                     <span>Join Room</span>
