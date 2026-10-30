@@ -1,8 +1,8 @@
 'use client';
 import React, { useState } from 'react';
-import { Users, UserPlus, Radio, UserCheck, Trash2, Search } from 'lucide-react';
+import { Users, UserPlus, Radio, UserCheck, Trash2, Search, Zap } from 'lucide-react';
 
-export default function FriendsView({ user, activeRoom, setActiveRoom }) {
+export default function FriendsView({ user, activeRoom, setActiveRoom, setActiveTab }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [friends, setFriends] = useState([
     { id: 1, name: 'Aarav Sharma', email: 'aarav@gmail.com', status: 'listening', is_online: true, active_room: 'BEAT1' },
@@ -13,7 +13,15 @@ export default function FriendsView({ user, activeRoom, setActiveRoom }) {
   const handleAddFriend = (e) => {
     e.preventDefault();
     if (!searchQuery.trim()) return;
-    alert(`Friend request sent to ${searchQuery}`);
+    const newFriend = {
+      id: Date.now(),
+      name: searchQuery.trim(),
+      email: `${searchQuery.toLowerCase().replace(/\s+/g, '')}@gmail.com`,
+      status: 'active',
+      is_online: true,
+      active_room: null
+    };
+    setFriends((prev) => [newFriend, ...prev]);
     setSearchQuery('');
   };
 
@@ -21,20 +29,30 @@ export default function FriendsView({ user, activeRoom, setActiveRoom }) {
     setFriends((prev) => prev.filter((f) => f.id !== id));
   };
 
+  const handleJoinFriendRoom = (code) => {
+    if (setActiveRoom) setActiveRoom(code);
+    if (setActiveTab) setActiveTab('rooms');
+  };
+
   return (
     <div className="flex flex-col gap-6 pb-28">
-      <div>
-        <h2 className="text-2xl font-black text-white text-glow-purple flex items-center gap-2">
-          <Users className="w-6 h-6 text-purple-400" />
-          <span>Friends & Live Telemetry</span>
-        </h2>
-        <p className="text-xs text-zinc-400">See what your friends are listening to in real-time and join their rooms</p>
+      {/* Header */}
+      <div className="p-5 rounded-2xl bg-[#0F1626] border border-white/5 flex items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center shrink-0">
+            <Users className="w-5 h-5 text-emerald-400" />
+          </div>
+          <div>
+            <h2 className="text-base font-black text-white tracking-wide">Friends & Live Sync</h2>
+            <p className="text-xs text-zinc-400">See what your friends are listening to and join their rooms with 1 click</p>
+          </div>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Friends List */}
-        <div className="lg:col-span-2 glass-panel p-6 flex flex-col gap-4">
-          <h3 className="text-sm font-bold text-white uppercase tracking-wider">Your Friends ({friends.length})</h3>
+        <div className="lg:col-span-2 p-6 rounded-2xl bg-[#0F1626] border border-white/5 flex flex-col gap-4">
+          <h3 className="text-xs font-bold text-zinc-300 uppercase tracking-wider">Your Connected Friends ({friends.length})</h3>
 
           <div className="flex flex-col gap-3">
             {friends.map((f) => {
@@ -51,50 +69,49 @@ export default function FriendsView({ user, activeRoom, setActiveRoom }) {
                 : 'Offline ⚪';
 
               return (
-                <div key={f.id} className="glass-card p-4 flex items-center justify-between gap-4">
+                <div key={f.id} className="p-3.5 px-4 rounded-xl bg-[#080C14] border border-white/5 flex items-center justify-between gap-4 hover:border-emerald-500/30 transition-all">
                   <div className="flex items-center gap-3">
                     <div className="relative">
-                      <div className="w-10 h-10 rounded-full bg-purple-500/20 text-purple-300 font-bold text-sm flex items-center justify-center uppercase">
+                      <div className="w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 font-bold text-sm flex items-center justify-center uppercase">
                         {f.name.charAt(0)}
                       </div>
                       <span
-                        className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-black ${
-                          f.is_online ? 'bg-emerald-400' : 'bg-zinc-600'
+                        className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-[#080C14] ${
+                          f.is_online ? 'bg-emerald-500' : 'bg-zinc-600'
                         }`}
                       />
                     </div>
 
                     <div className="flex flex-col">
-                      <span className="text-sm font-bold text-white">{f.name}</span>
-                      <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${statusColor} w-max mt-0.5`}>
-                        {statusText}
-                      </span>
+                      <h4 className="text-xs font-bold text-white">{f.name}</h4>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${statusColor}`}>
+                          {statusText}
+                        </span>
+                        {f.active_room && (
+                          <span className="text-[10px] text-cyan-400 font-mono font-bold">
+                            In Room {f.active_room}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2">
-                    {f.active_room && f.active_room !== activeRoom && (
+                  <div className="flex items-center gap-2 shrink-0">
+                    {f.active_room && (
                       <button
-                        onClick={() => setActiveRoom(f.active_room)}
-                        className="px-3 py-1.5 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 text-xs font-bold border border-cyan-500/30 transition-all"
+                        onClick={() => handleJoinFriendRoom(f.active_room)}
+                        className="px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-extrabold flex items-center gap-1.5 transition-all cursor-pointer shadow-md shadow-emerald-500/20"
                       >
-                        Join Room {f.active_room}
-                      </button>
-                    )}
-
-                    {activeRoom && f.is_online && !f.active_room && (
-                      <button
-                        onClick={() => alert(`Invited ${f.name} to room ${activeRoom}`)}
-                        className="px-3 py-1.5 rounded-xl bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 text-xs font-bold border border-purple-500/30 transition-all"
-                      >
-                        Invite
+                        <Radio className="w-3.5 h-3.5" />
+                        <span>Join Room</span>
                       </button>
                     )}
 
                     <button
                       onClick={() => handleRemoveFriend(f.id)}
-                      className="p-2 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors"
-                      title="Unfriend"
+                      className="p-1.5 rounded-lg text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer"
+                      title="Remove Friend"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -105,29 +122,35 @@ export default function FriendsView({ user, activeRoom, setActiveRoom }) {
           </div>
         </div>
 
-        {/* Add Friends Section */}
-        <div className="glass-panel p-6 flex flex-col gap-4 h-max">
-          <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
-            <UserPlus className="w-4 h-4 text-purple-400" />
-            <span>Add New Friends</span>
-          </h3>
+        {/* Add Friend Sidebar Widget */}
+        <div className="p-6 rounded-2xl bg-[#0F1626] border border-white/5 flex flex-col gap-4 h-fit">
+          <div className="flex items-center gap-2 pb-3 border-b border-white/5">
+            <UserPlus className="w-4 h-4 text-emerald-400" />
+            <h3 className="text-xs font-bold text-white uppercase tracking-wider">Add New Friend</h3>
+          </div>
 
           <form onSubmit={handleAddFriend} className="flex flex-col gap-3">
-            <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-black/30 border border-white/10">
-              <Search className="w-4 h-4 text-zinc-400" />
-              <input
-                type="text"
-                placeholder="Enter email or username..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full bg-transparent text-xs text-white outline-none"
-              />
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-bold text-zinc-300">Username or Email</label>
+              <div className="flex items-center gap-2.5 px-3 py-2 rounded-xl bg-[#080C14] border border-white/10 focus-within:border-emerald-500/50">
+                <Search className="w-4 h-4 text-zinc-500" />
+                <input
+                  type="text"
+                  placeholder="e.g. Alex, ananya@gmail.com..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full bg-transparent text-xs text-white outline-none placeholder:text-zinc-500"
+                  required
+                />
+              </div>
             </div>
+
             <button
               type="submit"
-              className="py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-cyan-600 text-white font-bold text-xs hover:opacity-90 transition-opacity"
+              className="py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-extrabold flex items-center justify-center gap-2 shadow-md shadow-emerald-500/20 transition-all cursor-pointer"
             >
-              Send Friend Request
+              <UserPlus className="w-4 h-4" />
+              <span>Send Invite</span>
             </button>
           </form>
         </div>

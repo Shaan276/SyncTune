@@ -1,6 +1,6 @@
 'use client';
 import React, { useState } from 'react';
-import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, Heart, Film, ListMusic } from 'lucide-react';
+import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, Heart, Film, ListMusic, Zap } from 'lucide-react';
 import { formatTime } from '../lib/youtube';
 
 export default function PlayerFooter({
@@ -35,27 +35,27 @@ export default function PlayerFooter({
   };
 
   return (
-    <footer className="fixed bottom-0 left-0 right-0 glass-panel border-t border-white/10 p-3 px-6 flex items-center justify-between gap-4 z-40 select-none shadow-2xl">
+    <footer className="fixed bottom-0 left-0 right-0 bg-[#0B0F19]/95 backdrop-blur-md border-t border-white/5 p-3 px-6 flex items-center justify-between gap-4 z-40 select-none shadow-2xl">
       {/* Left: Track Info */}
       <div className="flex items-center gap-3 w-1/4 min-w-[200px]">
-        <div className="w-12 h-12 rounded-xl bg-purple-950/50 border border-white/10 overflow-hidden flex-shrink-0 shadow-md">
+        <div className="w-12 h-12 rounded-xl bg-[#141C30] border border-white/10 overflow-hidden shrink-0 shadow-md">
           {currentSong?.thumbnail ? (
             <img src={currentSong.thumbnail} alt={currentSong.title} className="w-full h-full object-cover" />
           ) : (
-            <div className="w-full h-full flex items-center justify-center text-purple-400 font-bold text-xs">
+            <div className="w-full h-full flex items-center justify-center text-emerald-400 font-black text-xs">
               Sync
             </div>
           )}
         </div>
         <div className="flex flex-col min-w-0">
           <h4 className="text-xs font-bold text-white truncate">{currentSong?.title || 'No song playing'}</h4>
-          <p className="text-[11px] text-zinc-400 truncate">{currentSong?.artist || 'Search or pick a track to play'}</p>
+          <p className="text-[11px] text-zinc-400 truncate">{currentSong?.artist || 'Pick a track or join a room'}</p>
         </div>
         {currentSong && onToggleLike && (
           <button
             onClick={() => onToggleLike(currentSong)}
-            className={`p-1.5 rounded-lg transition-colors ${
-              isLiked ? 'text-emerald-400 bg-emerald-500/10' : 'text-zinc-500 hover:text-white'
+            className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+              isLiked ? 'text-pink-400 bg-pink-500/10' : 'text-zinc-500 hover:text-white'
             }`}
           >
             <Heart className={`w-4 h-4 ${isLiked ? 'fill-current' : ''}`} />
@@ -64,7 +64,7 @@ export default function PlayerFooter({
       </div>
 
       {/* Middle: Controls & Progress */}
-      <div className="flex flex-col items-center gap-1 flex-1 max-w-xl">
+      <div className="flex flex-col items-center gap-1.5 flex-1 max-w-xl">
         <div className="flex items-center gap-5">
           <button
             onClick={onSkipPrev}
@@ -77,10 +77,10 @@ export default function PlayerFooter({
 
           <button
             onClick={handlePlayClick}
-            className="w-10 h-10 rounded-full bg-gradient-to-r from-purple-500 to-cyan-500 text-white flex items-center justify-center shadow-lg shadow-purple-500/30 hover:scale-105 active:scale-95 transition-all cursor-pointer"
+            className="w-10 h-10 rounded-full bg-emerald-500 hover:bg-emerald-400 text-black flex items-center justify-center shadow-lg shadow-emerald-500/25 hover:scale-105 active:scale-95 transition-all cursor-pointer font-bold"
             title={isPlaying ? "Pause" : "Play"}
           >
-            {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5 fill-current" />}
+            {isPlaying ? <Pause className="w-4 h-4 fill-black" /> : <Play className="w-4 h-4 ml-0.5 fill-black" />}
           </button>
 
           <button
@@ -95,10 +95,10 @@ export default function PlayerFooter({
           {onToggleQueue && (
             <button
               onClick={onToggleQueue}
-              className={`p-2 rounded-lg border transition-all flex items-center gap-1.5 text-[11px] font-bold cursor-pointer ${
+              className={`p-2 px-2.5 rounded-xl border transition-all flex items-center gap-1.5 text-[11px] font-bold cursor-pointer ${
                 isQueueOpen
-                  ? 'bg-purple-600 text-white border-purple-400 shadow-md shadow-purple-500/30'
-                  : 'bg-purple-500/10 text-purple-300 border-purple-500/20 hover:bg-purple-500/20'
+                  ? 'bg-emerald-500 text-black border-emerald-400 shadow-md shadow-emerald-500/20'
+                  : 'bg-[#141C30] text-zinc-300 border-white/5 hover:bg-[#1a2540]'
               }`}
               title="Toggle Playback Queue"
             >
@@ -110,7 +110,7 @@ export default function PlayerFooter({
           {onToggleCinema && (
             <button
               onClick={onToggleCinema}
-              className="p-2 rounded-lg bg-cyan-500/10 text-cyan-300 border border-cyan-500/20 hover:bg-cyan-500/20 transition-all flex items-center gap-1 text-[11px] font-bold cursor-pointer"
+              className="p-2 px-2.5 rounded-xl bg-purple-500/15 text-purple-300 border border-purple-500/25 hover:bg-purple-500/25 transition-all flex items-center gap-1 text-[11px] font-bold cursor-pointer"
               title="Toggle Watch Together Cinema"
             >
               <Film className="w-3.5 h-3.5" />
@@ -129,7 +129,7 @@ export default function PlayerFooter({
             step="1"
             value={currentTime || 0}
             onChange={handleSliderSeek}
-            className="flex-1 h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-cyan-400"
+            className="flex-1 h-1.5 bg-[#141C30] rounded-lg appearance-none cursor-pointer accent-emerald-400"
           />
           <span>{formatTime(duration)}</span>
         </div>
@@ -137,8 +137,9 @@ export default function PlayerFooter({
 
       {/* Right: Volume & Ultra Low Data Badge */}
       <div className="flex items-center justify-end gap-4 w-1/4 min-w-[180px]">
-        <div className="px-2.5 py-1 rounded-lg bg-cyan-500/10 border border-cyan-500/20 text-cyan-300 text-[10px] font-bold font-mono">
-          Ultra-Low Data ⚡ ~1MB
+        <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold font-mono">
+          <Zap className="w-3 h-3 fill-emerald-400" />
+          <span>~1MB Pure Audio</span>
         </div>
 
         <div className="flex items-center gap-2">
@@ -158,7 +159,7 @@ export default function PlayerFooter({
               setIsMuted(false);
               onVolumeChange && onVolumeChange(parseFloat(e.target.value));
             }}
-            className="w-20 h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-purple-400"
+            className="w-20 h-1.5 bg-[#141C30] rounded-lg appearance-none cursor-pointer accent-emerald-400"
           />
         </div>
       </div>

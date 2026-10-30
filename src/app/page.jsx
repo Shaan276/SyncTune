@@ -25,7 +25,6 @@ export default function Home() {
 
   const [activeTab, setActiveTab] = useState('dashboard');
   const [activeRoom, setActiveRoom] = useState(null);
-  const [isDarkMode, setIsDarkMode] = useState(true);
 
   // Playback & Queue state
   const [currentSong, setCurrentSong] = useState(null);
@@ -95,7 +94,6 @@ export default function Home() {
 
     fetchLiveRecommendations(currentSong).then((recs) => {
       if (active) {
-        // Enforce <10m filter on all incoming recommendation tracks
         const validArtist = (recs.artistTracks || []).filter((s) => (s.duration || 210) <= 600);
         const validGenre = (recs.genreTracks || []).filter((s) => (s.duration || 210) <= 600);
         setArtistRecommendations(validArtist);
@@ -108,29 +106,18 @@ export default function Home() {
     };
   }, [currentSong?.id, currentSong?.artist]);
 
-  // Sync dark/light theme class on document element
-  useEffect(() => {
-    if (!isDarkMode) {
-      document.documentElement.classList.add('light-mode');
-    } else {
-      document.documentElement.classList.remove('light-mode');
-    }
-  }, [isDarkMode]);
-
   const handleSearch = async (query, category) => {
     if (!query) {
       setSearchResults([]);
       return;
     }
     const results = await searchYouTube(query, category);
-    // Filter tracks <= 10m
     setSearchResults(results.filter((s) => (s.duration || 210) <= 600));
   };
 
   const handlePlaySong = useCallback((song) => {
     if (!song || !song.id) return;
 
-    // Enforce 10-minute maximum duration limit
     if ((song.duration || 0) > 600) {
       alert("SyncTune is optimized for low data consumption tracks under 10 minutes.");
       return;
@@ -168,7 +155,6 @@ export default function Home() {
   }, []);
 
   const handleSkipNext = useCallback(() => {
-    // 1. Next in User Queue
     if (queue.length > 0) {
       const nextSong = queue[0];
       const remainingQueue = queue.slice(1);
@@ -180,7 +166,6 @@ export default function Home() {
       return;
     }
 
-    // 2. Next based on user's selected autoplayMode preference
     if (autoplayMode === 'artist') {
       if (artistRecommendations.length > 0) {
         handlePlaySong(artistRecommendations[0]);
@@ -191,7 +176,6 @@ export default function Home() {
         return;
       }
     } else {
-      // 'taste' (default)
       if (genreRecommendations.length > 0) {
         handlePlaySong(genreRecommendations[0]);
         return;
@@ -202,7 +186,6 @@ export default function Home() {
       }
     }
 
-    // 3. Fallback history loop
     if (history.length > 1 && currentSong) {
       const currentIndex = history.findIndex((s) => s.id === currentSong.id);
       const nextIndex = (currentIndex + 1) % history.length;
@@ -221,7 +204,7 @@ export default function Home() {
   const handleAddToQueue = useCallback((song) => {
     if (!song) return;
     if ((song.duration || 0) > 600) {
-      alert("Only songs under 10 minutes can be added to queue.");
+      alert("Only tracks under 10 minutes can be added to queue.");
       return;
     }
 
@@ -301,41 +284,50 @@ export default function Home() {
     setShowAuthModal(false);
   };
 
+  const handleQuickCreateRoom = useCallback(() => {
+    setActiveTab('rooms');
+    const newCode = 'SYNC' + Math.floor(100 + Math.random() * 900);
+    setActiveRoom(newCode);
+  }, []);
+
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-[var(--background)] text-[var(--foreground)] select-none">
-      {/* Sidebar */}
+    <div className="flex h-screen w-screen overflow-hidden bg-[#080C14] text-[#F8FAFC] select-none">
+      {/* Modern Sidebar (Nutri-Track inspired) */}
       <Sidebar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         user={user}
         activeRoom={activeRoom}
-        isDarkMode={isDarkMode}
-        setIsDarkMode={setIsDarkMode}
+        onCreateRoomQuick={handleQuickCreateRoom}
+        onOpenCinema={() => setIsCinemaOpen(true)}
         onOpenAuth={() => setShowAuthModal(true)}
         onLogout={handleLogout}
       />
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-[#080C14]">
         <Header
           user={user}
-          onSearch={handleSearch}
           activeRoom={activeRoom}
           activeTab={activeTab}
+          onCreateRoomQuick={handleQuickCreateRoom}
           onLogout={handleLogout}
           onOpenAuth={() => setShowAuthModal(true)}
         />
 
-        <main className="flex-1 overflow-y-auto px-6 py-2 custom-scrollbar">
+        <main className="flex-1 overflow-y-auto px-6 py-4 custom-scrollbar">
           {activeTab === 'dashboard' && (
             <DashboardView
+              user={user}
               searchResults={searchResults}
+              onSearch={handleSearch}
               onPlaySong={handlePlaySong}
               onAddToQueue={handleAddToQueue}
               likedSongs={likedSongs}
               onToggleLike={handleToggleLike}
               history={history}
               onClearHistory={handleClearHistory}
+              onNavigateTab={(tab) => setActiveTab(tab)}
             />
           )}
 
