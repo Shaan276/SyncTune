@@ -3,25 +3,59 @@ import { NextResponse } from 'next/server';
 export const dynamic = 'force-dynamic';
 
 function cleanArtistName(name) {
+  if (!name) return 'YouTube Artist';
   if (name.endsWith(' - Topic')) return name.slice(0, -8);
   if (name.endsWith('VEVO')) return name.slice(0, -4);
   return name.trim();
 }
 
+// Blocklist of non-music keywords to ensure educational/tutorial/vlog/tech channels are filtered out
+const NON_MUSIC_INDICATORS = [
+  'tutorial', 'lecture', 'course', 'class', 'exam', 'gate', 'coding', 'programming',
+  'unboxing', 'review', 'podcast', 'episode', 'walkthrough', 'gameplay', 'news', 'interview',
+  'learning', 'study', 'maths', 'science', 'computer science', 'crash course', 'education',
+  'how to', 'syllabus', 'preparation', 'solved', 'question paper', 'chapter'
+];
+
+function isLikelyNonMusic(title = '', artist = '') {
+  const combined = `${title} ${artist}`.toLowerCase();
+  return NON_MUSIC_INDICATORS.some(keyword => combined.includes(keyword));
+}
+
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
-  const query = searchParams.get('q') || '';
-  const category = searchParams.get('type') || 'music';
+  const query = (searchParams.get('q') || '').trim();
+  const category = (searchParams.get('type') || 'music').toLowerCase();
 
-  if (!query.trim()) {
+  if (!query) {
+    return NextResponse.json({ songs: [], total: 0 });
+  }
+
+  // If search query itself is clearly non-music (like "knowledgegate channel" or "gate exam lecture"), return empty
+  if (isLikelyNonMusic(query, '')) {
     return NextResponse.json({ songs: [], total: 0 });
   }
 
   try {
     let searchQuery = query;
-    if (category === 'mix') searchQuery += ' mashup mix';
-    else if (category === 'artist') searchQuery += ' songs';
-    else searchQuery += ' official audio';
+    let maxDurationSeconds = 600; // Default max 10 minutes
+
+    if (category === 'mix' || category === 'mixups') {
+      // Mixups / Mashups can be of ANY length as per user requirement
+      searchQuery = `${query} mashup mix nonstop remixes`;
+      maxDurationSeconds = Infinity;
+    } else if (category === 'artist') {
+      searchQuery = `${query} songs official audio track`;
+      maxDurationSeconds = 600;
+    } else if (category === 'bhajan' || category === 'satsang') {
+      // Admin-only devotional category
+      searchQuery = `${query} bhajan satsang kirtan aarti devotional`;
+      maxDurationSeconds = 1200; // allow up to 20m for devotional
+    } else {
+      // Standard 'music' category: strictly songs under 10m
+      searchQuery = `${query} song official audio music video`;
+      maxDurationSeconds = 600;
+    }
 
     const targetUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(searchQuery)}`;
     
@@ -55,9 +89,14 @@ export async function GET(request) {
             const videoId = video.videoId;
             if (!videoId || seen.has(videoId)) continue;
 
-            const title = video.title?.runs?.[0]?.text || 'YouTube Music';
-            let artist = video.ownerText?.runs?.[0]?.text || 'YouTube Artist';
+            const title = video.title?.runs?.[0]?.text || '';
+            let artist = video.ownerText?.runs?.[0]?.text || '';
             artist = cleanArtistName(artist);
+
+            // Filter out non-music / educational content
+            if (isLikelyNonMusic(title, artist)) {
+              continue;
+            }
 
             const durationText = video.lengthText?.simpleText || '3:30';
             const parts = durationText.split(':').map(Number);
@@ -65,13 +104,18 @@ export async function GET(request) {
             if (parts.length === 2) duration = parts[0] * 60 + parts[1];
             else if (parts.length === 3) duration = parts[0] * 3600 + parts[1] * 60 + parts[2];
 
+            // Strict duration check (unless mixups)
+            if (duration > maxDurationSeconds) {
+              continue;
+            }
+
             const thumbnail = `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`;
 
             seen.add(videoId);
             songs.push({
               id: videoId,
-              title,
-              artist,
+              title: title || 'Music Track',
+              artist: artist || 'Official Artist',
               duration,
               thumbnail
             });
@@ -80,22 +124,16 @@ export async function GET(request) {
           }
         }
 
-        if (songs.length > 0) {
-          return NextResponse.json({ songs, total: songs.length });
-        }
+        return NextResponse.json({ songs, total: songs.length });
       }
     }
   } catch (err) {
     console.error("Next.js Search API error:", err);
   }
 
-  // Fallback
+  // NO FAKE DATA: If nothing found or query is not music, return empty list!
   return NextResponse.json({
-    songs: [
-      { id: "hT_nvWreIhg", title: "One Love - Official Music Video", artist: "Shubh", duration: 160, thumbnail: "https://img.youtube.com/vi/hT_nvWreIhg/mqdefault.jpg" },
-      { id: "vJQMv7A_N30", title: "Cheques - Official Music Video", artist: "Shubh", duration: 184, thumbnail: "https://img.youtube.com/vi/vJQMv7A_N30/mqdefault.jpg" },
-      { id: "cl0a3iBN78U", title: "Elevated - Official Music Video", artist: "Shubh", duration: 202, thumbnail: "https://img.youtube.com/vi/cl0a3iBN78U/mqdefault.jpg" }
-    ],
-    total: 3
+    songs: [],
+    total: 0
   });
 }

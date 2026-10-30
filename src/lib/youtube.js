@@ -41,7 +41,10 @@ export function formatPlayMultiplier(count) {
 }
 
 export function formatFullDateTime(dateInput) {
-  if (!dateInput) return '30 Aug 2026, 10:45 AM';
+  if (!dateInput) {
+    const now = new Date();
+    return `${now.getDate()} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][now.getMonth()]} ${now.getFullYear()}, ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+  }
   try {
     const date = typeof dateInput === 'string' ? new Date(dateInput) : dateInput;
     if (isNaN(date.getTime())) return dateInput;
@@ -59,25 +62,57 @@ export function formatFullDateTime(dateInput) {
 
     return `${day} ${month} ${year}, ${hours}:${minutes} ${ampm}`;
   } catch (e) {
-    return '30 Aug 2026, 10:45 AM';
+    return 'Recently';
   }
 }
 
-export function getUserRecommendations() {
+// Generates real recommendations purely from actual user history (Zero fake data)
+export function getUserRecommendations(history = []) {
   if (typeof window === 'undefined') return [];
+
   try {
     const metaDict = JSON.parse(localStorage.getItem('synctune_song_metadata') || '{}');
     const counts = JSON.parse(localStorage.getItem('synctune_play_counts') || '{}');
 
-    const songList = Object.keys(metaDict).map((id) => ({
-      ...metaDict[id],
-      playCount: counts[id] || metaDict[id].playCount || 1
-    }));
+    // Aggregate from both metadata dictionary and passed history array
+    const combinedMap = new Map();
+
+    // 1. From history
+    for (const h of history) {
+      if (!h || !h.id) continue;
+      const count = counts[h.id] || 1;
+      combinedMap.set(h.id, {
+        id: h.id,
+        title: h.title,
+        artist: h.artist,
+        thumbnail: h.thumbnail,
+        duration: h.duration || 210,
+        playCount: count
+      });
+    }
+
+    // 2. From stored metadata dict
+    for (const id of Object.keys(metaDict)) {
+      if (!combinedMap.has(id)) {
+        combinedMap.set(id, {
+          ...metaDict[id],
+          playCount: counts[id] || metaDict[id].playCount || 1
+        });
+      }
+    }
+
+    const songList = Array.from(combinedMap.values());
 
     if (songList.length === 0) {
       return [];
     }
 
+    // If only 1 song listened, return that 1 song
+    if (songList.length === 1) {
+      return songList;
+    }
+
+    // Sort by play count descending
     songList.sort((a, b) => b.playCount - a.playCount);
     return songList.slice(0, 10);
   } catch (e) {

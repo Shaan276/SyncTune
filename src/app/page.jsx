@@ -61,9 +61,6 @@ export default function Home() {
       if (storedHistory) {
         const parsedHist = JSON.parse(storedHistory);
         setHistory(parsedHist);
-        if (parsedHist.length > 0 && !currentSong) {
-          setCurrentSong(parsedHist[0]);
-        }
       }
       const storedLiked = localStorage.getItem('synctune_liked_songs');
       if (storedLiked) {
@@ -112,14 +109,20 @@ export default function Home() {
       return;
     }
     const results = await searchYouTube(query, category);
-    setSearchResults(results.filter((s) => (s.duration || 210) <= 600));
+    if (category === 'mix' || category === 'mixups') {
+      // Mixups / Mashups can be of any length as requested
+      setSearchResults(results);
+    } else {
+      setSearchResults(results.filter((s) => (s.duration || 210) <= 600));
+    }
   };
 
   const handlePlaySong = useCallback((song) => {
     if (!song || !song.id) return;
 
-    if ((song.duration || 0) > 600) {
-      alert("SyncTune is optimized for low data consumption tracks under 10 minutes.");
+    const isMixup = (song.title && (song.title.toLowerCase().includes('mashup') || song.title.toLowerCase().includes('mix') || song.title.toLowerCase().includes('remix')));
+    if (!isMixup && (song.duration || 0) > 600) {
+      alert("SyncTune pure tracks are optimized for low data consumption under 10 minutes (Mixups & Mashups can be any length).");
       return;
     }
 
@@ -155,6 +158,7 @@ export default function Home() {
   }, []);
 
   const handleSkipNext = useCallback(() => {
+    // 1. Explicit user queue has top priority
     if (queue.length > 0) {
       const nextSong = queue[0];
       const remainingQueue = queue.slice(1);
@@ -166,26 +170,50 @@ export default function Home() {
       return;
     }
 
+    // 2. Autoplay mode: 'artist' or 'taste' (taste is default)
     if (autoplayMode === 'artist') {
       if (artistRecommendations.length > 0) {
-        handlePlaySong(artistRecommendations[0]);
+        const nextSong = artistRecommendations[0];
+        setArtistRecommendations((prev) => prev.slice(1));
+        handlePlaySong(nextSong);
         return;
       }
       if (genreRecommendations.length > 0) {
-        handlePlaySong(genreRecommendations[0]);
+        const nextSong = genreRecommendations[0];
+        setGenreRecommendations((prev) => prev.slice(1));
+        handlePlaySong(nextSong);
         return;
       }
     } else {
       if (genreRecommendations.length > 0) {
-        handlePlaySong(genreRecommendations[0]);
+        const nextSong = genreRecommendations[0];
+        setGenreRecommendations((prev) => prev.slice(1));
+        handlePlaySong(nextSong);
         return;
       }
       if (artistRecommendations.length > 0) {
-        handlePlaySong(artistRecommendations[0]);
+        const nextSong = artistRecommendations[0];
+        setArtistRecommendations((prev) => prev.slice(1));
+        handlePlaySong(nextSong);
         return;
       }
     }
 
+    // 3. Fallback: on-demand recommendation fetch for current song
+    if (currentSong) {
+      fetchLiveRecommendations(currentSong).then((recs) => {
+        const list = autoplayMode === 'artist'
+          ? [...(recs.artistTracks || []), ...(recs.genreTracks || [])]
+          : [...(recs.genreTracks || []), ...(recs.artistTracks || [])];
+        const valid = list.filter((s) => s.id !== currentSong.id && (s.duration || 210) <= 600);
+        if (valid.length > 0) {
+          handlePlaySong(valid[0]);
+          return;
+        }
+      });
+    }
+
+    // 4. Fallback to cycling previous history
     if (history.length > 1 && currentSong) {
       const currentIndex = history.findIndex((s) => s.id === currentSong.id);
       const nextIndex = (currentIndex + 1) % history.length;
@@ -203,8 +231,9 @@ export default function Home() {
 
   const handleAddToQueue = useCallback((song) => {
     if (!song) return;
-    if ((song.duration || 0) > 600) {
-      alert("Only tracks under 10 minutes can be added to queue.");
+    const isMixup = (song.title && (song.title.toLowerCase().includes('mashup') || song.title.toLowerCase().includes('mix')));
+    if (!isMixup && (song.duration || 0) > 600) {
+      alert("Only pure tracks under 10 minutes (or mixups) can be added to queue.");
       return;
     }
 
@@ -237,6 +266,8 @@ export default function Home() {
   const handleClearHistory = useCallback(() => {
     try {
       localStorage.removeItem('synctune_history');
+      localStorage.removeItem('synctune_play_counts');
+      localStorage.removeItem('synctune_song_metadata');
     } catch (e) {}
     setHistory([]);
   }, []);
@@ -259,6 +290,7 @@ export default function Home() {
   }, []);
 
   const handleToggleLike = useCallback((song) => {
+    if (!song || !song.id) return;
     setLikedSongs((prev) => {
       const exists = prev.some((s) => s.id === song.id);
       const updated = exists ? prev.filter((s) => s.id !== song.id) : [song, ...prev];
@@ -292,7 +324,7 @@ export default function Home() {
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#080C14] text-[#F8FAFC] select-none">
-      {/* Modern Sidebar (Nutri-Track inspired) */}
+      {/* Modern Sidebar */}
       <Sidebar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
@@ -315,7 +347,7 @@ export default function Home() {
           onOpenAuth={() => setShowAuthModal(true)}
         />
 
-        <main className="flex-1 overflow-y-auto px-6 py-4 custom-scrollbar">
+        <main className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 custom-scrollbar">
           {activeTab === 'dashboard' && (
             <DashboardView
               user={user}
@@ -388,6 +420,7 @@ export default function Home() {
         queue={queue}
         onToggleQueue={() => setIsQueueOpen(!isQueueOpen)}
         isQueueOpen={isQueueOpen}
+        activeRoom={activeRoom}
       />
 
       {/* Slide-out Queue Drawer */}
@@ -411,11 +444,13 @@ export default function Home() {
         setAutoplayMode={handleSetAutoplayMode}
       />
 
-      {/* Floating Watch Together Cinema Launcher */}
-      <FloatingWatchBtn
-        isOpen={isCinemaOpen}
-        onClick={() => setIsCinemaOpen(!isCinemaOpen)}
-      />
+      {/* Floating Watch Together Cinema Launcher: Only rendered when in an active room */}
+      {Boolean(activeRoom) && (
+        <FloatingWatchBtn
+          isOpen={isCinemaOpen}
+          onClick={() => setIsCinemaOpen(!isCinemaOpen)}
+        />
+      )}
 
       {/* Cinema Overlay View */}
       <CinemaPlayer

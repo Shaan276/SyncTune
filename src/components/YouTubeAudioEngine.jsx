@@ -5,9 +5,20 @@ export default function YouTubeAudioEngine({ currentSong, isPlaying, volume = 0.
   const playerRef = useRef(null);
   const isReadyRef = useRef(false);
   const lastSongIdRef = useRef(null);
+  const onEndedRef = useRef(onEnded);
+  const onTimeUpdateRef = useRef(onTimeUpdate);
+
+  // Keep references always current to eliminate React stale closure bugs
+  useEffect(() => {
+    onEndedRef.current = onEnded;
+  }, [onEnded]);
 
   useEffect(() => {
-    // 1. Ensure YouTube IFrame API script is present
+    onTimeUpdateRef.current = onTimeUpdate;
+  }, [onTimeUpdate]);
+
+  useEffect(() => {
+    // 1. Ensure YouTube IFrame API script is loaded
     if (!window.YT) {
       const tag = document.createElement('script');
       tag.src = 'https://www.youtube.com/iframe_api';
@@ -33,7 +44,7 @@ export default function YouTubeAudioEngine({ currentSong, isPlaying, volume = 0.
           showinfo: 0,
           modestbranding: 1,
           playsinline: 1,
-          suggestedQuality: 'small', // 144p audio-only stream
+          suggestedQuality: 'small', // Pure 144p audio-only stream (ultra-low bandwidth)
           origin: typeof window !== 'undefined' ? window.location.origin : ''
         },
         events: {
@@ -50,7 +61,9 @@ export default function YouTubeAudioEngine({ currentSong, isPlaying, volume = 0.
           },
           onStateChange: (event) => {
             if (event.data === window.YT.PlayerState.ENDED) {
-              if (onEnded) onEnded();
+              if (onEndedRef.current) {
+                onEndedRef.current();
+              }
             }
           }
         }
@@ -157,15 +170,15 @@ export default function YouTubeAudioEngine({ currentSong, isPlaying, volume = 0.
         if (playerRef.current && isReadyRef.current && typeof playerRef.current.getCurrentTime === 'function') {
           try {
             const time = playerRef.current.getCurrentTime();
-            if (onTimeUpdate && !isNaN(time)) {
-              onTimeUpdate(time);
+            if (onTimeUpdateRef.current && !isNaN(time)) {
+              onTimeUpdateRef.current(time);
             }
           } catch (e) {}
         }
       }, 500);
     }
     return () => clearInterval(interval);
-  }, [isPlaying, onTimeUpdate]);
+  }, [isPlaying]);
 
   return (
     <div

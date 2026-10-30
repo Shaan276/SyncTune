@@ -1,19 +1,14 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Shield, Users, Radio, Zap, Megaphone, Trash2, UserPlus, Eye, AlertTriangle, Activity, Database, CheckCircle2 } from 'lucide-react';
 import { supabase } from '../../lib/supabaseClient';
 
 export default function AdminView({ user, setActiveRoom }) {
-  const [usersList, setUsersList] = useState([
-    { id: 1, username: 'piyush', email: 'piyushpilkhwal74@gmail.com', role: 'admin', current_status: 'active', todayMB: 4.2, monthMB: 128.5 },
-    { id: 2, name: 'Aarav', email: 'aarav@gmail.com', role: 'user', current_status: 'listening', todayMB: 12.8, monthMB: 340.0 },
-    { id: 3, name: 'Ananya', email: 'ananya@gmail.com', role: 'user', current_status: 'active', todayMB: 1.5, monthMB: 45.2 },
-  ]);
+  const [usersList, setUsersList] = useState(
+    user ? [{ id: user.id || 1, username: user.username || 'Admin', email: user.email || 'admin@synctune.app', role: 'admin', current_status: 'active', todayMB: 0, monthMB: 0 }] : []
+  );
 
-  const [activeRooms, setActiveRooms] = useState([
-    { code: 'BEAT1', host_name: 'Piyush', member_count: 5, song_title: 'One Love', is_playing: 1 }
-  ]);
-
+  const [activeRooms, setActiveRooms] = useState([]);
   const [broadcastMsg, setBroadcastMsg] = useState('');
   const [showAddUserModal, setShowAddUserModal] = useState(false);
   const [newUsername, setNewUsername] = useState('');
@@ -21,6 +16,18 @@ export default function AdminView({ user, setActiveRoom }) {
   const [newPassword, setNewPassword] = useState('');
   const [newRole, setNewRole] = useState('user');
   const [broadcastSent, setBroadcastSent] = useState(false);
+
+  useEffect(() => {
+    // Fetch live active rooms for admin monitor
+    fetch('/api/room?action=list')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data && data.rooms) {
+          setActiveRooms(data.rooms);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const handleSendBroadcast = (e) => {
     e.preventDefault();
@@ -118,7 +125,7 @@ export default function AdminView({ user, setActiveRoom }) {
           </div>
           <div className="mt-3">
             <div className="text-2xl font-black text-white">{usersList.length}</div>
-            <p className="text-[11px] text-emerald-400 font-medium mt-1">100% verified persistent</p>
+            <p className="text-[11px] text-emerald-400 font-medium mt-1">Verified persistent</p>
           </div>
         </div>
 
@@ -129,18 +136,18 @@ export default function AdminView({ user, setActiveRoom }) {
           </div>
           <div className="mt-3">
             <div className="text-2xl font-black text-white">{activeRooms.length}</div>
-            <p className="text-[11px] text-cyan-400 font-medium mt-1">Synced to Supabase & Node</p>
+            <p className="text-[11px] text-cyan-400 font-medium mt-1">Active sync sessions</p>
           </div>
         </div>
 
         <div className="p-4 rounded-2xl bg-[#0F1626] border border-[#1E293B] flex flex-col justify-between">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Bandwidth Saved</span>
+            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Ultra-Low Data</span>
             <Zap className="w-4 h-4 text-[#10B981]" />
           </div>
           <div className="mt-3">
-            <div className="text-2xl font-black text-[#10B981]">482.4 MB</div>
-            <p className="text-[11px] text-slate-400 font-medium mt-1">via 144p pure audio stream</p>
+            <div className="text-2xl font-black text-[#10B981]">144p Audio</div>
+            <p className="text-[11px] text-slate-400 font-medium mt-1">Zero video overhead</p>
           </div>
         </div>
 
@@ -151,7 +158,7 @@ export default function AdminView({ user, setActiveRoom }) {
           </div>
           <div className="mt-3">
             <div className="text-2xl font-black text-white">99.98%</div>
-            <p className="text-[11px] text-emerald-400 font-medium mt-1">Zero dropped sync frames</p>
+            <p className="text-[11px] text-emerald-400 font-medium mt-1">Real-time sync online</p>
           </div>
         </div>
       </div>
@@ -204,7 +211,7 @@ export default function AdminView({ user, setActiveRoom }) {
               <tr className="border-b border-[#1E293B] text-slate-400">
                 <th className="p-3">User Profile</th>
                 <th className="p-3">Role</th>
-                <th className="p-3">Data Usage (Today/Month)</th>
+                <th className="p-3">Usage</th>
                 <th className="p-3 text-right">Actions</th>
               </tr>
             </thead>
@@ -236,7 +243,7 @@ export default function AdminView({ user, setActiveRoom }) {
                     </span>
                   </td>
                   <td className="p-3 font-mono text-slate-300">
-                    <span className="text-white font-semibold">{u.todayMB} MB</span> / {u.monthMB} MB
+                    <span className="text-white font-semibold">{u.todayMB || 0} MB</span>
                   </td>
                   <td className="p-3 text-right">
                     <div className="flex items-center justify-end gap-2">
@@ -272,39 +279,45 @@ export default function AdminView({ user, setActiveRoom }) {
           </div>
 
           <div className="flex flex-col gap-3">
-            {activeRooms.map((r) => (
-              <div key={r.code} className="p-4 rounded-xl bg-[#080C14] border border-[#1E293B] flex flex-col gap-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                    <span className="font-mono font-black text-white text-sm">{r.code}</span>
+            {activeRooms.length > 0 ? (
+              activeRooms.map((r) => (
+                <div key={r.code} className="p-4 rounded-xl bg-[#080C14] border border-[#1E293B] flex flex-col gap-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                      <span className="font-mono font-black text-white text-sm">{r.code}</span>
+                    </div>
+                    <span className="text-[10px] text-slate-400 font-semibold px-2 py-0.5 rounded-full bg-[#1E293B]">
+                      {r.member_count || 1} listeners
+                    </span>
                   </div>
-                  <span className="text-[10px] text-slate-400 font-semibold px-2 py-0.5 rounded-full bg-[#1E293B]">
-                    {r.member_count} listeners
-                  </span>
-                </div>
-                <div className="text-xs text-slate-300">
-                  <span className="text-slate-500">Host:</span> <span className="font-bold text-white">{r.host_name}</span>
-                </div>
+                  <div className="text-xs text-slate-300">
+                    <span className="text-slate-500">Host:</span> <span className="font-bold text-white">{r.host_name}</span>
+                  </div>
 
-                <div className="flex items-center gap-2 pt-1 border-t border-[#1E293B]">
-                  <button
-                    onClick={() => setActiveRoom(r.code)}
-                    className="flex-1 py-1.5 rounded-lg bg-[#10B981]/15 text-[#10B981] font-bold text-xs hover:bg-[#10B981]/25 flex items-center justify-center gap-1.5 transition-colors"
-                  >
-                    <Eye className="w-3.5 h-3.5" />
-                    <span>Join Room</span>
-                  </button>
-                  <button
-                    onClick={() => handleDestroyRoom(r.code)}
-                    className="flex-1 py-1.5 rounded-lg bg-red-500/10 text-red-400 font-bold text-xs hover:bg-red-500/20 flex items-center justify-center gap-1.5 transition-colors"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    <span>Terminate</span>
-                  </button>
+                  <div className="flex items-center gap-2 pt-1 border-t border-[#1E293B]">
+                    <button
+                      onClick={() => setActiveRoom(r.code)}
+                      className="flex-1 py-1.5 rounded-lg bg-[#10B981]/15 text-[#10B981] font-bold text-xs hover:bg-[#10B981]/25 flex items-center justify-center gap-1.5 transition-colors"
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                      <span>Join Room</span>
+                    </button>
+                    <button
+                      onClick={() => handleDestroyRoom(r.code)}
+                      className="flex-1 py-1.5 rounded-lg bg-red-500/10 text-red-400 font-bold text-xs hover:bg-red-500/20 flex items-center justify-center gap-1.5 transition-colors"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Terminate</span>
+                    </button>
+                  </div>
                 </div>
+              ))
+            ) : (
+              <div className="p-6 rounded-xl bg-[#080C14] border border-[#1E293B] text-center text-xs text-slate-500 italic">
+                No active rooms currently created.
               </div>
-            ))}
+            )}
           </div>
         </div>
       </div>

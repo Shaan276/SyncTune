@@ -1,6 +1,6 @@
 'use client';
 import React, { useState } from 'react';
-import { Radio, Lock, Mail, User, ArrowRight, UserPlus, LogIn, Sparkles, CheckCircle2 } from 'lucide-react';
+import { Radio, Lock, Mail, User, ArrowRight, UserPlus, LogIn, CheckCircle2 } from 'lucide-react';
 
 export default function AuthModal({ onLogin, onClose, allowClose = false }) {
   const [isRegister, setIsRegister] = useState(false);
@@ -47,7 +47,7 @@ export default function AuthModal({ onLogin, onClose, allowClose = false }) {
       console.warn('Auth API network error, applying local session fallback:', err);
     }
 
-    // High-reliability fallback: Always successfully authenticate if API network glitch
+    // High-reliability session fallback
     const fallbackUser = {
       id: Date.now(),
       username: cleanUsername || 'Listener',
@@ -60,19 +60,6 @@ export default function AuthModal({ onLogin, onClose, allowClose = false }) {
     localStorage.setItem('token', 'synctune-jwt-token-v3');
     onLogin(fallbackUser);
     setLoading(false);
-  };
-
-  const handleQuickDemoAdmin = () => {
-    const adminUser = {
-      id: 1,
-      username: 'Piyush Pilkhwal',
-      email: 'piyushpilkhwal74@gmail.com',
-      role: 'admin',
-      status: 'active'
-    };
-    localStorage.setItem('user', JSON.stringify(adminUser));
-    localStorage.setItem('token', 'synctune-jwt-admin-token');
-    onLogin(adminUser);
   };
 
   return (
@@ -190,18 +177,8 @@ export default function AuthModal({ onLogin, onClose, allowClose = false }) {
           </button>
         </form>
 
-        {/* Quick Admin Access Helper for Piyush */}
-        <div className="pt-3 border-t border-white/10 flex items-center justify-between">
-          <button
-            type="button"
-            onClick={handleQuickDemoAdmin}
-            className="text-[11px] font-semibold text-emerald-400 hover:text-emerald-300 flex items-center gap-1.5 transition-colors cursor-pointer"
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>Fast Sign-in as Admin (Piyush)</span>
-          </button>
-
-          {allowClose && onClose && (
+        {allowClose && onClose && (
+          <div className="pt-2 border-t border-white/10 flex justify-center">
             <button
               type="button"
               onClick={onClose}
@@ -209,8 +186,8 @@ export default function AuthModal({ onLogin, onClose, allowClose = false }) {
             >
               Cancel
             </button>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </div>
   );
