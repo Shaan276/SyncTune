@@ -1,6 +1,6 @@
 'use client';
 import React, { useState } from 'react';
-import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, Heart, ListMusic, Zap, Repeat } from 'lucide-react';
+import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, Heart, ListMusic, Repeat } from 'lucide-react';
 import { formatTime } from '../lib/youtube';
 
 export default function PlayerFooter({
@@ -35,136 +35,190 @@ export default function PlayerFooter({
     }
   };
 
+  const progressPercent = duration > 0 ? Math.min(100, Math.max(0, (currentTime / duration) * 100)) : 0;
+
   return (
-    <footer className="fixed bottom-0 left-0 right-0 bg-[#0B0F19]/95 backdrop-blur-md border-t border-white/5 p-3 px-4 sm:px-6 flex items-center justify-between gap-3 sm:gap-4 z-40 select-none shadow-2xl">
-      {/* Left: Track Info */}
-      <div className="flex items-center gap-3 w-1/4 min-w-[170px] max-w-[280px]">
-        <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl bg-[#141C30] border border-white/10 overflow-hidden shrink-0 shadow-md">
-          {currentSong?.thumbnail ? (
-            <img src={currentSong.thumbnail} alt={currentSong.title} className="w-full h-full object-cover" />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center text-emerald-400 font-black text-xs">
-              Sync
-            </div>
-          )}
+    <footer className="fixed bottom-0 left-0 right-0 bg-[#0B0F19]/95 backdrop-blur-md border-t border-white/5 z-40 select-none shadow-2xl">
+      {/* 1. Sleek Full-Width Top Progress Bar (Interactive scrubber) */}
+      <div className="relative w-full h-1 bg-[#141C30] hover:h-2 transition-all cursor-pointer group">
+        <div
+          className="h-full bg-emerald-400 transition-[width] duration-150 relative"
+          style={{ width: `${progressPercent}%` }}
+        >
+          <div className="absolute right-0 top-1/2 -translate-y-1/2 w-2.5 h-2.5 bg-emerald-300 rounded-full shadow opacity-0 group-hover:opacity-100 transition-opacity" />
         </div>
-        <div className="flex flex-col min-w-0 flex-1">
-          <h4 className="text-xs font-bold text-white truncate">{currentSong?.title || 'No song playing'}</h4>
-          <p className="text-[11px] text-zinc-400 truncate">{currentSong?.artist || 'Pick a track or join a room'}</p>
-        </div>
-        {currentSong && onToggleLike && (
-          <button
-            onClick={() => onToggleLike(currentSong)}
-            className={`p-1.5 rounded-lg transition-colors cursor-pointer shrink-0 ${
-              isLiked ? 'text-pink-500 bg-pink-500/10' : 'text-zinc-500 hover:text-white'
-            }`}
-            title={isLiked ? 'Unlike track' : 'Like track'}
-          >
-            <Heart className={`w-4 h-4 ${isLiked ? 'fill-pink-500 text-pink-500' : ''}`} />
-          </button>
-        )}
+        <input
+          type="range"
+          min="0"
+          max={duration > 0 ? duration : 100}
+          step="1"
+          value={currentTime || 0}
+          onChange={handleSliderSeek}
+          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+          title="Seek playback time"
+        />
       </div>
 
-      {/* Middle: Controls & Progress */}
-      <div className="flex flex-col items-center gap-1.5 flex-1 max-w-xl min-w-0">
-        <div className="flex items-center gap-3 sm:gap-5">
-          {/* Loop / Repeat Button */}
-          <button
-            onClick={onToggleLoop}
-            className={`p-2 rounded-xl transition-all cursor-pointer ${
-              isLooping
-                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shadow-sm'
-                : 'text-zinc-400 hover:text-white hover:bg-white/5'
-            }`}
-            title={isLooping ? 'Loop Song: ON (Click to Disable)' : 'Loop Song: OFF (Click to Enable)'}
-          >
-            <Repeat className="w-4 h-4" />
-          </button>
+      {/* 2. Main Player Bar Content */}
+      <div className="p-2.5 px-3 sm:px-6 flex items-center justify-between gap-2 sm:gap-4">
+        {/* Left: Track Info & Thumbnail */}
+        <div className="flex items-center gap-2.5 sm:gap-3 flex-1 sm:flex-initial sm:w-1/4 sm:min-w-[180px] sm:max-w-[280px] min-w-0">
+          <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-[#141C30] border border-white/10 overflow-hidden shrink-0 shadow-md">
+            {currentSong?.thumbnail ? (
+              <img src={currentSong.thumbnail} alt={currentSong.title} className="w-full h-full object-cover" />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center text-emerald-400 font-black text-xs">
+                Sync
+              </div>
+            )}
+          </div>
 
-          <button
-            onClick={onSkipPrev}
-            disabled={history.length <= 1}
-            className="text-zinc-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
-            title="Previous Track"
-          >
-            <SkipBack className="w-4 h-4" />
-          </button>
+          <div className="flex flex-col min-w-0 flex-1">
+            <h4 className="text-xs font-bold text-white truncate">{currentSong?.title || 'No song playing'}</h4>
+            <p className="text-[11px] text-zinc-400 truncate">{currentSong?.artist || 'Pick a track or join a room'}</p>
+          </div>
 
-          <button
-            onClick={handlePlayClick}
-            className="w-10 h-10 rounded-full bg-emerald-500 hover:bg-emerald-400 text-black flex items-center justify-center shadow-lg shadow-emerald-500/25 hover:scale-105 active:scale-95 transition-all cursor-pointer font-bold shrink-0"
-            title={isPlaying ? "Pause" : "Play"}
-          >
-            {isPlaying ? <Pause className="w-4 h-4 fill-black" /> : <Play className="w-4 h-4 ml-0.5 fill-black" />}
-          </button>
+          {currentSong && onToggleLike && (
+            <button
+              onClick={() => onToggleLike(currentSong)}
+              className={`p-1.5 rounded-lg transition-colors cursor-pointer shrink-0 hidden xs:flex ${
+                isLiked ? 'text-pink-500 bg-pink-500/10' : 'text-zinc-500 hover:text-white'
+              }`}
+              title={isLiked ? 'Unlike track' : 'Like track'}
+            >
+              <Heart className={`w-3.5 h-3.5 sm:w-4 sm:h-4 ${isLiked ? 'fill-pink-500 text-pink-500' : ''}`} />
+            </button>
+          )}
+        </div>
 
+        {/* Middle: Desktop Playback Controls & Timeline */}
+        <div className="hidden sm:flex flex-col items-center gap-1.5 flex-1 max-w-xl min-w-0">
+          <div className="flex items-center gap-3 sm:gap-5">
+            {/* Loop / Repeat Button */}
+            <button
+              onClick={onToggleLoop}
+              className={`p-2 rounded-xl transition-all cursor-pointer ${
+                isLooping
+                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shadow-sm'
+                  : 'text-zinc-400 hover:text-white hover:bg-white/5'
+              }`}
+              title={isLooping ? 'Loop Song: ON (Click to Disable)' : 'Loop Song: OFF (Click to Enable)'}
+            >
+              <Repeat className="w-4 h-4" />
+            </button>
+
+            <button
+              onClick={onSkipPrev}
+              disabled={history.length <= 1}
+              className="text-zinc-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+              title="Previous Track"
+            >
+              <SkipBack className="w-4 h-4" />
+            </button>
+
+            <button
+              onClick={handlePlayClick}
+              className="w-10 h-10 rounded-full bg-emerald-500 hover:bg-emerald-400 text-black flex items-center justify-center shadow-lg shadow-emerald-500/25 hover:scale-105 active:scale-95 transition-all cursor-pointer font-bold shrink-0"
+              title={isPlaying ? 'Pause' : 'Play'}
+            >
+              {isPlaying ? <Pause className="w-4 h-4 fill-black" /> : <Play className="w-4 h-4 ml-0.5 fill-black" />}
+            </button>
+
+            <button
+              onClick={onSkipNext}
+              className="text-zinc-400 hover:text-white transition-colors cursor-pointer"
+              title="Next Track"
+            >
+              <SkipForward className="w-4 h-4" />
+            </button>
+
+            {/* Desktop Queue Button */}
+            {onToggleQueue && (
+              <button
+                onClick={onToggleQueue}
+                className={`p-2 px-2.5 rounded-xl border transition-all flex items-center gap-1.5 text-[11px] font-bold cursor-pointer shrink-0 ${
+                  isQueueOpen
+                    ? 'bg-emerald-500 text-black border-emerald-400 shadow-md shadow-emerald-500/20'
+                    : 'bg-[#141C30] text-zinc-300 border-white/5 hover:bg-[#1a2540]'
+                }`}
+                title="Toggle Playback Queue"
+              >
+                <ListMusic className="w-3.5 h-3.5" />
+                <span>Queue {queue.length > 0 ? `(${queue.length})` : ''}</span>
+              </button>
+            )}
+          </div>
+
+          {/* Desktop Time Indicators */}
+          <div className="flex items-center justify-between w-full text-[10px] text-zinc-400 font-mono px-1">
+            <span>{formatTime(currentTime)}</span>
+            <span>{formatTime(duration)}</span>
+          </div>
+        </div>
+
+        {/* Right on Desktop: Volume Slider */}
+        <div className="hidden sm:flex items-center justify-end gap-3 sm:gap-4 sm:w-1/4 sm:min-w-[130px] sm:max-w-[220px]">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setIsMuted(!isMuted)}
+              className="text-zinc-400 hover:text-white transition-colors cursor-pointer shrink-0"
+            >
+              {isMuted || volume === 0 ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+            </button>
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.05"
+              value={isMuted ? 0 : volume}
+              onChange={(e) => {
+                setIsMuted(false);
+                onVolumeChange && onVolumeChange(parseFloat(e.target.value));
+              }}
+              className="w-16 sm:w-20 h-1.5 bg-[#141C30] rounded-lg appearance-none cursor-pointer accent-emerald-400"
+            />
+          </div>
+        </div>
+
+        {/* Right on Mobile (< 640px): Ultra-clean Compact Controls */}
+        <div className="flex sm:hidden items-center gap-2 shrink-0">
+          {/* Mobile Queue Button */}
+          {onToggleQueue && (
+            <button
+              onClick={onToggleQueue}
+              className={`p-2 rounded-xl border transition-all flex items-center justify-center cursor-pointer ${
+                isQueueOpen
+                  ? 'bg-emerald-500 text-black border-emerald-400'
+                  : 'bg-[#141C30] text-zinc-300 border-white/10'
+              }`}
+              title="Queue"
+            >
+              <ListMusic className="w-4 h-4" />
+              {queue.length > 0 && (
+                <span className="ml-1 text-[10px] font-mono font-bold text-emerald-400">
+                  {queue.length}
+                </span>
+              )}
+            </button>
+          )}
+
+          {/* Mobile Skip Next */}
           <button
             onClick={onSkipNext}
-            className="text-zinc-400 hover:text-white transition-colors cursor-pointer"
+            className="p-1.5 text-zinc-300 hover:text-white transition-colors cursor-pointer"
             title="Next Track"
           >
             <SkipForward className="w-4 h-4" />
           </button>
 
-          {/* Queue Drawer Trigger */}
-          {onToggleQueue && (
-            <button
-              onClick={onToggleQueue}
-              className={`p-2 px-2.5 rounded-xl border transition-all flex items-center gap-1.5 text-[11px] font-bold cursor-pointer shrink-0 ${
-                isQueueOpen
-                  ? 'bg-emerald-500 text-black border-emerald-400 shadow-md shadow-emerald-500/20'
-                  : 'bg-[#141C30] text-zinc-300 border-white/5 hover:bg-[#1a2540]'
-              }`}
-              title="Toggle Playback Queue"
-            >
-              <ListMusic className="w-3.5 h-3.5" />
-              <span>Queue {queue.length > 0 ? `(${queue.length})` : ''}</span>
-            </button>
-          )}
-        </div>
-
-        {/* Seek Bar */}
-        <div className="flex items-center gap-2 sm:gap-3 w-full text-[10px] text-zinc-400 font-mono">
-          <span className="w-8 text-right shrink-0">{formatTime(currentTime)}</span>
-          <input
-            type="range"
-            min="0"
-            max={duration > 0 ? duration : 100}
-            step="1"
-            value={currentTime || 0}
-            onChange={handleSliderSeek}
-            className="flex-1 h-1.5 bg-[#141C30] rounded-lg appearance-none cursor-pointer accent-emerald-400 min-w-[80px]"
-          />
-          <span className="w-8 shrink-0">{formatTime(duration)}</span>
-        </div>
-      </div>
-
-      {/* Right: Volume & Ultra Low Data Badge */}
-      <div className="flex items-center justify-end gap-3 sm:gap-4 w-1/4 min-w-[130px] max-w-[220px]">
-        <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold font-mono shrink-0">
-          <Zap className="w-3 h-3 fill-emerald-400" />
-          <span>~1MB Pure Audio</span>
-        </div>
-
-        <div className="flex items-center gap-2">
+          {/* Mobile Big Play/Pause Button */}
           <button
-            onClick={() => setIsMuted(!isMuted)}
-            className="text-zinc-400 hover:text-white transition-colors cursor-pointer shrink-0"
+            onClick={handlePlayClick}
+            className="w-9 h-9 rounded-full bg-emerald-500 hover:bg-emerald-400 text-black flex items-center justify-center shadow-md shadow-emerald-500/25 active:scale-95 transition-all cursor-pointer shrink-0"
+            title={isPlaying ? 'Pause' : 'Play'}
           >
-            {isMuted || volume === 0 ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+            {isPlaying ? <Pause className="w-4 h-4 fill-black" /> : <Play className="w-4 h-4 ml-0.5 fill-black" />}
           </button>
-          <input
-            type="range"
-            min="0"
-            max="1"
-            step="0.05"
-            value={isMuted ? 0 : volume}
-            onChange={(e) => {
-              setIsMuted(false);
-              onVolumeChange && onVolumeChange(parseFloat(e.target.value));
-            }}
-            className="w-16 sm:w-20 h-1.5 bg-[#141C30] rounded-lg appearance-none cursor-pointer accent-emerald-400"
-          />
         </div>
       </div>
     </footer>
