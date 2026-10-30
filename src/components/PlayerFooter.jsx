@@ -181,12 +181,40 @@ export default function PlayerFooter({
         </div>
 
         {/* Right on Mobile (< 640px): Ultra-clean Compact Controls */}
-        <div className="flex sm:hidden items-center gap-2 shrink-0">
+        <div className="flex sm:hidden items-center gap-1.5 shrink-0">
+          {/* Mobile Skip Previous */}
+          <button
+            onClick={onSkipPrev}
+            disabled={!history || history.length <= 1}
+            className="p-1.5 text-zinc-300 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+            title="Previous Track"
+          >
+            <SkipBack className="w-4 h-4" />
+          </button>
+
+          {/* Mobile Big Play/Pause Button */}
+          <button
+            onClick={handlePlayClick}
+            className="w-9 h-9 rounded-full bg-emerald-500 hover:bg-emerald-400 text-black flex items-center justify-center shadow-md shadow-emerald-500/25 active:scale-95 transition-all cursor-pointer shrink-0"
+            title={isPlaying ? 'Pause' : 'Play'}
+          >
+            {isPlaying ? <Pause className="w-4 h-4 fill-black" /> : <Play className="w-4 h-4 ml-0.5 fill-black" />}
+          </button>
+
+          {/* Mobile Skip Next */}
+          <button
+            onClick={onSkipNext}
+            className="p-1.5 text-zinc-300 hover:text-white transition-colors cursor-pointer"
+            title="Next Track"
+          >
+            <SkipForward className="w-4 h-4" />
+          </button>
+
           {/* Mobile Queue Button */}
           {onToggleQueue && (
             <button
               onClick={onToggleQueue}
-              className={`p-2 rounded-xl border transition-all flex items-center justify-center cursor-pointer ${
+              className={`p-1.5 px-2 rounded-xl border transition-all flex items-center justify-center cursor-pointer ${
                 isQueueOpen
                   ? 'bg-emerald-500 text-black border-emerald-400'
                   : 'bg-[#141C30] text-zinc-300 border-white/10'
@@ -201,24 +229,6 @@ export default function PlayerFooter({
               )}
             </button>
           )}
-
-          {/* Mobile Skip Next */}
-          <button
-            onClick={onSkipNext}
-            className="p-1.5 text-zinc-300 hover:text-white transition-colors cursor-pointer"
-            title="Next Track"
-          >
-            <SkipForward className="w-4 h-4" />
-          </button>
-
-          {/* Mobile Big Play/Pause Button */}
-          <button
-            onClick={handlePlayClick}
-            className="w-9 h-9 rounded-full bg-emerald-500 hover:bg-emerald-400 text-black flex items-center justify-center shadow-md shadow-emerald-500/25 active:scale-95 transition-all cursor-pointer shrink-0"
-            title={isPlaying ? 'Pause' : 'Play'}
-          >
-            {isPlaying ? <Pause className="w-4 h-4 fill-black" /> : <Play className="w-4 h-4 ml-0.5 fill-black" />}
-          </button>
         </div>
       </div>
     </footer>

@@ -1,13 +1,15 @@
 'use client';
 import React, { useEffect, useRef } from 'react';
 
-// 44-byte valid silent WAV data URI to maintain mobile background audio session
+// 44-byte silent WAV data URI to keep mobile OS audio session active
 const SILENT_AUDIO_URI = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
 
 export default function YouTubeAudioEngine({
   currentSong,
   isPlaying,
   volume = 0.8,
+  currentTime = 0,
+  duration = 100,
   onTimeUpdate,
   onEnded,
   onTogglePlay,
@@ -27,9 +29,12 @@ export default function YouTubeAudioEngine({
   const onSkipNextRef = useRef(onSkipNext);
   const onSkipPrevRef = useRef(onSkipPrev);
   const onSeekRef = useRef(onSeek);
-  const silentAudioRef = useRef(null);
 
-  // Keep callback references fresh
+  const silentAudioRef = useRef(null);
+  const audioContextRef = useRef(null);
+  const isAudioUnlockedRef = useRef(false);
+
+  // Sync latest callback references
   useEffect(() => {
     onEndedRef.current = onEnded;
   }, [onEnded]);
@@ -49,19 +54,69 @@ export default function YouTubeAudioEngine({
     onSeekRef.current = onSeek;
   }, [onSeek]);
 
-  // 1. Silent HTML5 Audio carrier management for mobile background persistence
+  // 1. Synchronously Unlock Audio Pipeline on User Interaction (Required for iOS Safari & Android Chrome)
+  useEffect(() => {
+    const unlockAudioSession = () => {
+      // Unlock HTML5 Audio
+      const audio = silentAudioRef.current;
+      if (audio) {
+        audio.play().catch(() => {});
+      }
+
+      // Unlock Web Audio API AudioContext
+      try {
+        if (!audioContextRef.current) {
+          const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+          if (AudioContextClass) {
+            const ctx = new AudioContextClass();
+            const buffer = ctx.createBuffer(1, 1, 22050);
+            const source = ctx.createBufferSource();
+            source.buffer = buffer;
+            source.connect(ctx.destination);
+            source.start(0);
+            audioContextRef.current = ctx;
+          }
+        }
+        if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+          audioContextRef.current.resume().catch(() => {});
+        }
+      } catch (e) {}
+
+      isAudioUnlockedRef.current = true;
+    };
+
+    window.addEventListener('touchstart', unlockAudioSession, { passive: true });
+    window.addEventListener('touchend', unlockAudioSession, { passive: true });
+    window.addEventListener('click', unlockAudioSession, { passive: true });
+    window.addEventListener('keydown', unlockAudioSession, { passive: true });
+
+    return () => {
+      window.removeEventListener('touchstart', unlockAudioSession);
+      window.removeEventListener('touchend', unlockAudioSession);
+      window.removeEventListener('click', unlockAudioSession);
+      window.removeEventListener('keydown', unlockAudioSession);
+    };
+  }, []);
+
+  // 2. Manage Audio Session when isPlaying changes
   useEffect(() => {
     const audio = silentAudioRef.current;
-    if (!audio) return;
+    if (audio) {
+      if (isPlaying) {
+        audio.play().catch(() => {});
+      } else {
+        audio.pause();
+      }
+    }
 
-    if (isPlaying) {
-      audio.play().catch(() => {});
-    } else {
-      audio.pause();
+    if (audioContextRef.current) {
+      if (isPlaying && audioContextRef.current.state === 'suspended') {
+        audioContextRef.current.resume().catch(() => {});
+      }
     }
   }, [isPlaying]);
 
-  // 2. Setup MediaSession API (Lock screen & notification center controls)
+  // 3. MediaSession API integration for Lock Screen and Notification Center
   useEffect(() => {
     if (typeof window === 'undefined' || !('mediaSession' in navigator)) return;
 
@@ -105,11 +160,19 @@ export default function YouTubeAudioEngine({
             if (window.syncTuneSeekAudio) window.syncTuneSeekAudio(details.seekTime);
           }
         });
+
+        if ('setPositionState' in navigator.mediaSession && duration > 0) {
+          navigator.mediaSession.setPositionState({
+            duration: Math.max(1, duration),
+            playbackRate: 1,
+            position: Math.min(currentTime, duration)
+          });
+        }
       } catch (err) {}
     }
-  }, [currentSong?.id, currentSong?.title, currentSong?.artist, isPlaying]);
+  }, [currentSong?.id, currentSong?.title, currentSong?.artist, isPlaying, duration]);
 
-  // 3. YouTube Player Initialization & Background Auto-Resume
+  // 4. Initialize YouTube IFrame API
   useEffect(() => {
     if (!window.YT) {
       const tag = document.createElement('script');
@@ -124,8 +187,8 @@ export default function YouTubeAudioEngine({
       if (playerRef.current || !window.YT || !window.YT.Player) return;
 
       playerRef.current = new window.YT.Player('synctune-ultra-low-audio-engine', {
-        height: '1',
-        width: '1',
+        height: '200',
+        width: '200',
         videoId: currentSong?.id || '',
         playerVars: {
           autoplay: 1,
@@ -157,13 +220,16 @@ export default function YouTubeAudioEngine({
                 onEndedRef.current();
               }
             } else if (event.data === window.YT.PlayerState.PAUSED) {
-              // Mobile browser auto-paused player on minimize or screen lock
-              if (document.hidden && isPlayingRef.current) {
+              // Mobile browser attempt to pause video when minimized/locked
+              if (isPlayingRef.current) {
+                // Instantly re-assert playback so music doesn't stop
                 setTimeout(() => {
                   try {
-                    playerRef.current?.playVideo();
+                    if (isPlayingRef.current && playerRef.current) {
+                      playerRef.current.playVideo();
+                    }
                   } catch (e) {}
-                }, 150);
+                }, 50);
               }
             }
           }
@@ -177,7 +243,7 @@ export default function YouTubeAudioEngine({
       window.onYouTubeIframeAPIReady = initPlayer;
     }
 
-    // 4. Global helper methods
+    // Global helper methods
     window.syncTunePlayAudio = (songId) => {
       if (playerRef.current && isReadyRef.current) {
         try {
@@ -197,6 +263,9 @@ export default function YouTubeAudioEngine({
       if (silentAudioRef.current) {
         silentAudioRef.current.play().catch(() => {});
       }
+      if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+        audioContextRef.current.resume().catch(() => {});
+      }
     };
 
     window.syncTuneSeekAudio = (targetSeconds) => {
@@ -209,11 +278,13 @@ export default function YouTubeAudioEngine({
       }
     };
 
-    // 5. Visibility Change & Background Resilience Handler
+    // 5. Lifecycle event handlers: NEVER pause audio on visibilitychange/pagehide
     const handleVisibilityChange = () => {
-      if (document.hidden && isPlayingRef.current && playerRef.current) {
-        // Tab went to background or minimized: Keep audio alive
+      if (isPlayingRef.current && playerRef.current) {
         try {
+          if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+            audioContextRef.current.resume().catch(() => {});
+          }
           if (silentAudioRef.current) {
             silentAudioRef.current.play().catch(() => {});
           }
@@ -283,7 +354,7 @@ export default function YouTubeAudioEngine({
     }
   }, [volume]);
 
-  // Time tracking and background keep-alive loop
+  // Time tracking and background auto-correction loop
   useEffect(() => {
     let interval;
     if (isPlaying) {
@@ -295,11 +366,11 @@ export default function YouTubeAudioEngine({
               onTimeUpdateRef.current(time);
             }
 
-            // If hidden on mobile and player got paused by OS, resume it
-            if (document.hidden && isPlayingRef.current) {
+            // Auto-resume if mobile OS attempted to pause in background
+            if (isPlayingRef.current) {
               const state = playerRef.current.getPlayerState();
               if (state === 2) {
-                // 2 is PAUSED
+                // State 2 is PAUSED
                 playerRef.current.playVideo();
               }
             }
@@ -312,7 +383,7 @@ export default function YouTubeAudioEngine({
 
   return (
     <>
-      {/* Silent HTML5 audio element for mobile OS background audio persistence */}
+      {/* Real HTML5 audio carrier element unlocked by user interaction */}
       <audio
         ref={silentAudioRef}
         src={SILENT_AUDIO_URI}
@@ -322,14 +393,16 @@ export default function YouTubeAudioEngine({
         style={{ display: 'none' }}
       />
 
+      {/* Styled with scale(0.001) so browser and YouTube detect normal dimensions without auto-pause */}
       <div
         style={{
           position: 'fixed',
           bottom: 0,
           right: 0,
-          width: '1px',
-          height: '1px',
-          opacity: 0.001,
+          width: '240px',
+          height: '180px',
+          transform: 'scale(0.001)',
+          transformOrigin: 'bottom right',
           pointerEvents: 'none',
           zIndex: 1
         }}

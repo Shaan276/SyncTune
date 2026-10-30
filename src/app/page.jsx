@@ -93,6 +93,22 @@ export default function Home() {
     } catch (e) {}
   }, []);
 
+  // Hydrate persistent listened_history from database for the active user
+  useEffect(() => {
+    if (!user || !user.id) return;
+    fetch(`/api/history?userId=${user.id}&email=${encodeURIComponent(user.email || '')}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.success && Array.isArray(d.history) && d.history.length > 0) {
+          setHistory(d.history);
+          try {
+            localStorage.setItem('synctune_history', JSON.stringify(d.history));
+          } catch (e) {}
+        }
+      })
+      .catch(() => {});
+  }, [user?.id]);
+
   const handleRefreshQueue = useCallback(async (overrideMode) => {
     const baseSong = currentSongRef.current;
     if (!baseSong) return;
@@ -196,7 +212,7 @@ export default function Home() {
   };
 
   // Play a song & synchronize with room members
-  const handlePlaySong = useCallback((song, isFromRoomSync = false) => {
+  const handlePlaySong = useCallback((song, isFromRoomSync = false, isGoingBack = false) => {
     if (!song || !song.id) return;
 
     const isMixup = (song.title && (song.title.toLowerCase().includes('mashup') || song.title.toLowerCase().includes('mix') || song.title.toLowerCase().includes('remix')));
@@ -237,14 +253,29 @@ export default function Home() {
       playedAtTimestamp: new Date().toISOString()
     };
 
-    setHistory((prev) => {
-      const filtered = prev.filter((s) => s.id !== song.id);
-      const updated = [historyItem, ...filtered].slice(0, 50);
-      try {
-        localStorage.setItem('synctune_history', JSON.stringify(updated));
-      } catch (e) {}
-      return updated;
-    });
+    if (!isGoingBack) {
+      setHistory((prev) => {
+        const filtered = prev.filter((s) => s.id !== song.id);
+        const updated = [historyItem, ...filtered].slice(0, 50);
+        try {
+          localStorage.setItem('synctune_history', JSON.stringify(updated));
+        } catch (e) {}
+        return updated;
+      });
+
+      // Save to database listened_history for currently logged in user
+      if (userRef.current) {
+        fetch('/api/history', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: userRef.current.id,
+            email: userRef.current.email,
+            song: historyItem
+          })
+        }).catch(() => {});
+      }
+    }
 
     if (typeof window !== 'undefined' && window.syncTunePlayAudio) {
       window.syncTunePlayAudio(song.id);
@@ -361,10 +392,18 @@ export default function Home() {
   }, [handlePlaySong]);
 
   const handleSkipPrev = useCallback(() => {
-    if (history.length > 1 && currentSong) {
-      const currentIndex = history.findIndex((s) => s.id === currentSong.id);
-      const prevIndex = currentIndex > 0 ? currentIndex - 1 : history.length - 1;
-      handlePlaySong(history[prevIndex]);
+    if (!currentSong || history.length <= 1) return;
+    const currentIndex = history.findIndex((s) => s.id === currentSong.id);
+    let targetSong = null;
+    if (currentIndex >= 0 && currentIndex + 1 < history.length) {
+      targetSong = history[currentIndex + 1];
+    } else if (currentIndex === -1 && history.length > 0) {
+      targetSong = history[0];
+    } else if (history.length > 1) {
+      targetSong = history[1];
+    }
+    if (targetSong) {
+      handlePlaySong(targetSong, false, true); // isGoingBack = true
     }
   }, [history, currentSong, handlePlaySong]);
 
@@ -594,6 +633,7 @@ export default function Home() {
         onVolumeChange={setVolume}
         likedSongs={likedSongs}
         onToggleLike={handleToggleLike}
+        history={history}
         queue={queue}
         onToggleQueue={() => setIsQueueOpen(!isQueueOpen)}
         isQueueOpen={isQueueOpen}
@@ -638,6 +678,8 @@ export default function Home() {
         currentSong={currentSong}
         isPlaying={isPlaying}
         volume={volume}
+        currentTime={currentTime}
+        duration={duration}
         onTimeUpdate={(time) => setCurrentTime(Math.floor(time))}
         onEnded={handleSkipNext}
         onTogglePlay={handleTogglePlay}
