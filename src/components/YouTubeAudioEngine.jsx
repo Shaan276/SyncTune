@@ -1,5 +1,5 @@
 'use client';
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 export default function YouTubeAudioEngine({
   currentSong,
@@ -68,7 +68,7 @@ export default function YouTubeAudioEngine({
   // 1. Synchronously Unlock Audio Pipeline on User Interaction (iOS Safari & Android Chrome)
   useEffect(() => {
     const unlockAudioSession = () => {
-      // 0. AudioSession API for iOS
+      // AudioSession API for iOS
       if (typeof navigator !== 'undefined' && 'audioSession' in navigator) {
         try {
           navigator.audioSession.type = 'playback';
@@ -243,8 +243,10 @@ export default function YouTubeAudioEngine({
     }
   }, [currentSong?.id, currentSong?.title, currentSong?.artist, isPlaying, duration, volume]);
 
-  // 4. Initialize YouTube IFrame API as Fallback Player
+  // 4. Initialize YouTube IFrame API ONLY IF fallback is required
   useEffect(() => {
+    if (!useIframeFallback) return;
+
     if (!window.YT) {
       const tag = document.createElement('script');
       tag.src = 'https://www.youtube.com/iframe_api';
@@ -288,14 +290,14 @@ export default function YouTubeAudioEngine({
               event.target.setPlaybackQuality('small');
               event.target.setVolume(Math.floor(volume * 100));
               event.target.unMute();
-              if (useIframeFallbackRef.current && isPlayingRef.current && currentSong?.id) {
+              if (isPlayingRef.current && currentSong?.id) {
                 event.target.playVideo();
               }
             } catch (e) {}
           },
           onStateChange: (event) => {
             if (event.data === window.YT.PlayerState.ENDED) {
-              if (useIframeFallbackRef.current && onEndedRef.current) {
+              if (onEndedRef.current) {
                 onEndedRef.current();
               }
             }
@@ -309,32 +311,19 @@ export default function YouTubeAudioEngine({
     } else {
       window.onYouTubeIframeAPIReady = initPlayer;
     }
+  }, [useIframeFallback]);
 
-    // Global helper methods
+  // Global helper methods
+  useEffect(() => {
     window.syncTunePlayAudio = (songId) => {
-      if (audioRef.current && !useIframeFallbackRef.current) {
+      setUseIframeFallback(false);
+      if (audioRef.current) {
         if (songId && songId !== lastSongIdRef.current) {
           lastSongIdRef.current = songId;
           audioRef.current.src = `/api/stream?id=${encodeURIComponent(songId)}`;
         }
         audioRef.current.volume = volume;
         audioRef.current.play().catch(() => {});
-      }
-
-      if (useIframeFallbackRef.current && playerRef.current && isReadyRef.current) {
-        try {
-          if (songId && songId !== lastSongIdRef.current) {
-            playerRef.current.loadVideoById({
-              videoId: songId,
-              startSeconds: 0,
-              suggestedQuality: 'small'
-            });
-            lastSongIdRef.current = songId;
-          }
-          playerRef.current.unMute();
-          playerRef.current.setVolume(Math.floor(volume * 100));
-          playerRef.current.playVideo();
-        } catch (e) {}
       }
 
       if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
@@ -363,7 +352,6 @@ export default function YouTubeAudioEngine({
       }
     };
 
-    // Auto-resume cleanly when app returns to foreground
     const handleVisibilityChange = () => {
       if (!document.hidden && isPlayingRef.current) {
         try {
@@ -415,13 +403,6 @@ export default function YouTubeAudioEngine({
             console.warn('[SyncTune Audio] Direct play deferred:', err);
           });
         }
-      }
-
-      // Pre-cue fallback YouTube player
-      if (playerRef.current && isReadyRef.current) {
-        try {
-          playerRef.current.cueVideoById(currentSong.id);
-        } catch (e) {}
       }
     }
   }, [currentSong?.id, currentSong?.playTrigger, isPlaying, volume]);
@@ -482,43 +463,32 @@ export default function YouTubeAudioEngine({
           }
         }}
         onError={(e) => {
-          console.warn('[SyncTune Native Audio] Stream error, seamlessly switching to fallback engine:', e);
+          const src = audioRef.current?.getAttribute('src');
+          if (!src || !currentSong?.id) return;
+          console.warn('[SyncTune Native Audio] Stream error, switching to fallback:', e);
           setUseIframeFallback(true);
-          if (playerRef.current && isReadyRef.current && currentSong?.id) {
-            try {
-              playerRef.current.loadVideoById({
-                videoId: currentSong.id,
-                startSeconds: currentTime || 0,
-                suggestedQuality: 'small'
-              });
-              playerRef.current.unMute();
-              playerRef.current.setVolume(Math.floor(volume * 100));
-              if (isPlayingRef.current) {
-                playerRef.current.playVideo();
-              }
-            } catch (err) {}
-          }
         }}
         style={{ display: 'none' }}
       />
 
-      {/* Backup YouTube Iframe Engine container */}
-      <div
-        style={{
-          position: 'fixed',
-          bottom: 0,
-          right: 0,
-          width: '320px',
-          height: '240px',
-          transform: 'scale(0.001)',
-          transformOrigin: 'bottom right',
-          pointerEvents: 'none',
-          zIndex: 1,
-          opacity: useIframeFallback ? 1 : 0.001
-        }}
-      >
-        <div id="synctune-ultra-low-audio-engine" />
-      </div>
+      {/* Backup YouTube Iframe Engine container (only rendered if fallback is actively triggered) */}
+      {useIframeFallback && (
+        <div
+          style={{
+            position: 'fixed',
+            bottom: 0,
+            right: 0,
+            width: '320px',
+            height: '240px',
+            transform: 'scale(0.001)',
+            transformOrigin: 'bottom right',
+            pointerEvents: 'none',
+            zIndex: 1
+          }}
+        >
+          <div id="synctune-ultra-low-audio-engine" />
+        </div>
+      )}
     </>
   );
 }
