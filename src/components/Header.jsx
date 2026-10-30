@@ -1,6 +1,6 @@
 'use client';
-import React, { useState } from 'react';
-import { Calendar, Bell, Radio, User, Zap, Sparkles, LogOut } from 'lucide-react';
+import React from 'react';
+import { Calendar, Radio, Menu } from 'lucide-react';
 
 export default function Header({
   user,
@@ -8,7 +8,8 @@ export default function Header({
   activeTab,
   onCreateRoomQuick,
   onOpenAuth,
-  onLogout
+  onLogout,
+  onToggleMobileSidebar
 }) {
   const getPageTitle = () => {
     switch (activeTab) {
@@ -33,37 +34,39 @@ export default function Header({
   };
 
   return (
-    <header className="h-16 px-6 bg-[#080C14] border-b border-white/5 flex items-center justify-between gap-4 select-none shrink-0">
-      {/* Left: Modern Page Title */}
-      <div className="flex items-center gap-3">
-        <h2 className="text-lg font-black text-white tracking-wide">{getPageTitle()}</h2>
+    <header className="h-16 px-4 sm:px-6 bg-[#080C14] border-b border-white/5 flex items-center justify-between gap-3 select-none shrink-0 z-20">
+      {/* Left: Mobile Menu Toggle + Page Title */}
+      <div className="flex items-center gap-3 min-w-0">
+        <button
+          onClick={onToggleMobileSidebar}
+          className="md:hidden p-2 rounded-xl bg-[#0F1626] border border-white/10 text-zinc-300 hover:text-white cursor-pointer active:scale-95 shrink-0"
+          title="Toggle Navigation Menu"
+        >
+          <Menu className="w-5 h-5 text-emerald-400" />
+        </button>
+
+        <h2 className="text-base sm:text-lg font-black text-white tracking-wide truncate">{getPageTitle()}</h2>
+        
         {activeRoom && (
-          <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 text-[11px] font-bold font-mono">
+          <span className="hidden sm:flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 text-[11px] font-bold font-mono shrink-0">
             <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping" />
             <span>Room {activeRoom} Synced</span>
           </span>
         )}
       </div>
 
-      {/* Right: Modern Nutri-Track Style Utility Widgets */}
-      <div className="flex items-center gap-3">
-        {/* Date Pill (Matching Nutri-Track) */}
+      {/* Right: Date, Quick Room, User Profile */}
+      <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+        {/* Date Pill (Hidden on mobile) */}
         <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#0F1626] border border-white/5 text-xs text-zinc-300 font-semibold">
           <Calendar className="w-3.5 h-3.5 text-zinc-400" />
           <span>{currentDateFormatted()}</span>
         </div>
 
-        {/* Dynamic Low Data Badge (Matching Nutri-Track 'Dynamic Nutrition: ON') */}
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs font-bold">
-          <Zap className="w-3.5 h-3.5 text-emerald-400 fill-emerald-400" />
-          <span className="hidden md:inline">Ultra-Low Data:</span>
-          <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 text-[10px] font-black">ON</span>
-        </div>
-
         {/* Quick Room Action Button */}
         <button
           onClick={onCreateRoomQuick}
-          className="px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold text-xs flex items-center gap-1.5 shadow-md shadow-emerald-500/20 transition-all cursor-pointer active:scale-95"
+          className="px-3 sm:px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold text-xs flex items-center gap-1.5 shadow-md shadow-emerald-500/20 transition-all cursor-pointer active:scale-95"
           title="Create or Join Listening Room"
         >
           <Radio className="w-3.5 h-3.5" />
@@ -85,10 +88,9 @@ export default function Header({
         ) : (
           <button
             onClick={onOpenAuth}
-            className="p-2 rounded-xl bg-[#0F1626] border border-white/10 hover:border-emerald-500/40 text-zinc-400 hover:text-white transition-colors cursor-pointer"
-            title="Sign In"
+            className="px-3 py-1.5 rounded-xl bg-[#0F1626] hover:bg-[#141C30] border border-white/10 text-xs font-bold text-white transition-colors cursor-pointer"
           >
-            <User className="w-4 h-4" />
+            Sign In
           </button>
         )}
       </div>

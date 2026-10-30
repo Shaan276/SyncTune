@@ -2,6 +2,68 @@ import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 
+if (!global._synctune_recommend_cache) {
+  global._synctune_recommend_cache = new Map();
+}
+const recommendCache = global._synctune_recommend_cache;
+
+const RECORD_LABELS = [
+  't-series', 'tseries', 'zee music', 'sony music', 'speed records', 'yrf', 'tips official',
+  'tips music', 'saregama', 'eros now', 'white hill', 'geet mp3', 'desi music factory',
+  'aditya music', 'lahari music', 'think music', 'svf', 'times music', 'venus', 'vevo'
+];
+
+function isRecordLabel(name = '') {
+  const lower = name.toLowerCase().trim();
+  return RECORD_LABELS.some((label) => lower.includes(label)) ||
+    lower.endsWith(' music') || lower.endsWith(' records') || lower.endsWith(' official');
+}
+
+function extractArtists(title = '', rawArtist = '') {
+  let foundArtists = [];
+  if (rawArtist && !isRecordLabel(rawArtist)) {
+    const split = rawArtist.split(/[,&/]|(?:feat\.?|ft\.?)\s+/i).map(s => s.trim()).filter(Boolean);
+    foundArtists.push(...split);
+  }
+
+  if (title) {
+    const singerMatch = title.match(/(?:singers?|sung by|by|feat\.?|ft\.?)\s*[:\-]?\s*([^|()[\]]+)/i);
+    if (singerMatch && singerMatch[1]) {
+      const singers = singerMatch[1].split(/[,&/]/).map(s => s.trim()).filter(s => s.length > 2 && s.length < 35);
+      foundArtists.push(...singers);
+    }
+    const segments = title.split(/[|\-–—]/).map(s => s.trim()).filter(Boolean);
+    for (let i = segments.length - 1; i >= 1; i--) {
+      const seg = segments[i];
+      if (/video|audio|lyrics|full song|teaser|trailer|song/i.test(seg) && !seg.includes(',')) continue;
+      const potential = seg.split(/[,&]/).map(s => s.replace(/\([^)]*\)/g, '').replace(/\[[^\]]*\]/g, '').trim()).filter(s => s.length > 2 && s.length < 35);
+      if (potential.length > 0) {
+        foundArtists.push(...potential);
+        break;
+      }
+    }
+  }
+
+  const cleanList = [];
+  const seen = new Set();
+  const banWords = ['official', 'video', 'song', 'audio', 'lyrics', 'full', 'remix', 'music', 'records', 'movie', 'film'];
+
+  for (const a of foundArtists) {
+    const clean = a.trim();
+    const lower = clean.toLowerCase();
+    if (clean.length < 2 || seen.has(lower)) continue;
+    if (banWords.some(w => lower === w || isRecordLabel(lower))) continue;
+    seen.add(lower);
+    cleanList.push(clean);
+  }
+
+  if (cleanList.length === 0 && rawArtist) {
+    cleanList.push(rawArtist);
+  }
+
+  return cleanList;
+}
+
 function cleanArtistName(name) {
   if (!name) return 'Artist';
   if (name.endsWith(' - Topic')) return name.slice(0, -8);
@@ -12,13 +74,17 @@ function cleanArtistName(name) {
 async function fetchFromYouTube(searchQuery, excludeId = '') {
   try {
     const targetUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(searchQuery)}`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 4000);
+
     const response = await fetch(targetUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept-Language': 'en-US,en;q=0.9'
       },
-      next: { revalidate: 3600 }
+      signal: controller.signal
     });
+    clearTimeout(timeout);
 
     if (response.ok) {
       const html = await response.text();
@@ -49,7 +115,7 @@ async function fetchFromYouTube(searchQuery, excludeId = '') {
             if (parts.length === 2) duration = parts[0] * 60 + parts[1];
             else if (parts.length === 3) duration = parts[0] * 3600 + parts[1] * 60 + parts[2];
 
-            // STRICT FILTER: Songs must be under 10 minutes (600 seconds)
+            // Strict limit: Songs under 10 minutes
             if (duration > 600) continue;
 
             const title = video.title?.runs?.[0]?.text || 'YouTube Song';
@@ -65,40 +131,92 @@ async function fetchFromYouTube(searchQuery, excludeId = '') {
               thumbnail: `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`
             });
 
-            if (songs.length >= 8) break;
+            if (songs.length >= 10) break;
           }
         }
         return songs;
       }
     }
-  } catch (e) {
-    console.error('Recommend fetch error:', e);
-  }
+  } catch (e) {}
   return [];
 }
 
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
-  const artist = searchParams.get('artist') || '';
+  const rawArtist = searchParams.get('artist') || '';
   const title = searchParams.get('title') || '';
   const videoId = searchParams.get('videoId') || '';
 
-  if (!artist && !title) {
+  if (!rawArtist && !title) {
     return NextResponse.json({ artistTracks: [], genreTracks: [] });
   }
 
-  // 1. Fetch same artist tracks (<10m)
-  const artistQuery = artist ? `${artist} songs official audio` : `${title} songs`;
-  const artistTracks = await fetchFromYouTube(artistQuery, videoId);
+  const cacheKey = `${videoId}_${rawArtist}_${title}`;
+  const cached = recommendCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < 15 * 60 * 1000) {
+    return NextResponse.json(cached.data);
+  }
 
-  // 2. Fetch same genre & taste recommendations (<10m)
-  const genreQuery = artist ? `${artist} radio mix similar songs` : `${title} radio mix`;
-  const genreTracks = await fetchFromYouTube(genreQuery, videoId);
+  // 1. Extract real artists
+  const artists = extractArtists(title, rawArtist);
 
-  return NextResponse.json({
+  // 2. Fetch Strictly Same Artist Tracks
+  let artistTracks = [];
+  const artistSeen = new Set();
+  if (videoId) artistSeen.add(videoId);
+
+  for (const art of artists.slice(0, 3)) {
+    const artSongs = await fetchFromYouTube(`${art} songs official audio`, videoId);
+    for (const song of artSongs) {
+      if (!artistSeen.has(song.id)) {
+        // Verify artist is strictly present in title or channel
+        const checkStr = `${song.title} ${song.artist}`.toLowerCase();
+        if (checkStr.includes(art.toLowerCase())) {
+          artistSeen.add(song.id);
+          artistTracks.push(song);
+        }
+      }
+    }
+  }
+
+  // If still need more artist tracks and we have at least one artist, do broader search
+  if (artistTracks.length < 5 && artists.length > 0) {
+    const primaryArtist = artists[0];
+    const moreSongs = await fetchFromYouTube(`${primaryArtist} top hits songs`, videoId);
+    for (const song of moreSongs) {
+      if (!artistSeen.has(song.id)) {
+        artistSeen.add(song.id);
+        artistTracks.push(song);
+      }
+    }
+  }
+
+  // 3. Fetch Same Taste & Genre Tracks (Vibe match, excluding primary artist)
+  const cleanTitle = title.split(/[|\-–—]/)[0]?.replace(/\([^)]*\)/g, '').trim() || title;
+  const genreQuery = artists.length > 0
+    ? `${artists[0]} radio mix similar songs`
+    : `${cleanTitle} similar vibe songs`;
+
+  const genreRaw = await fetchFromYouTube(genreQuery, videoId);
+  const genreTracks = [];
+  const genreSeen = new Set();
+  if (videoId) genreSeen.add(videoId);
+
+  for (const song of genreRaw) {
+    if (!genreSeen.has(song.id)) {
+      genreSeen.add(song.id);
+      genreTracks.push(song);
+    }
+  }
+
+  const payload = {
     success: true,
-    artist,
-    artistTracks,
-    genreTracks
-  });
+    artists,
+    artistTracks: artistTracks.slice(0, 10),
+    genreTracks: genreTracks.slice(0, 10)
+  };
+
+  recommendCache.set(cacheKey, { data: payload, timestamp: Date.now() });
+
+  return NextResponse.json(payload);
 }

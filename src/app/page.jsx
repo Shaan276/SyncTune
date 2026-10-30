@@ -39,6 +39,7 @@ export default function Home() {
   const [genreRecommendations, setGenreRecommendations] = useState([]);
   const [autoplayMode, setAutoplayMode] = useState('taste'); // 'taste' (default) or 'artist'
   const [isQueueOpen, setIsQueueOpen] = useState(false);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
   const queueRef = useRef(queue);
   queueRef.current = queue;
@@ -92,11 +93,33 @@ export default function Home() {
     } catch (e) {}
   }, []);
 
+  const handleRefreshQueue = useCallback(async (overrideMode) => {
+    const baseSong = currentSongRef.current;
+    if (!baseSong) return;
+    const mode = overrideMode || autoplayModeRef.current;
+    try {
+      const recs = await fetchLiveRecommendations(baseSong);
+      const candidates = mode === 'artist'
+        ? (recs.artistTracks || [])
+        : (recs.genreTracks || []);
+
+      const newTracks = candidates
+        .filter((t) => t.id !== baseSong.id && (t.duration || 210) <= 600)
+        .slice(0, 10);
+
+      setQueue(newTracks);
+      try {
+        localStorage.setItem('synctune_queue', JSON.stringify(newTracks));
+      } catch (e) {}
+    } catch (err) {}
+  }, []);
+
   const handleSetAutoplayMode = (mode) => {
     setAutoplayMode(mode);
     try {
       localStorage.setItem('synctune_autoplay_mode', mode);
     } catch (e) {}
+    handleRefreshQueue(mode);
   };
 
   // Helper: Replenish queue to maintain exactly 10 upcoming tracks
@@ -109,8 +132,8 @@ export default function Home() {
     try {
       const recs = await fetchLiveRecommendations(baseSong);
       const candidates = autoplayModeRef.current === 'artist'
-        ? [...(recs.artistTracks || []), ...(recs.genreTracks || [])]
-        : [...(recs.genreTracks || []), ...(recs.artistTracks || [])];
+        ? (recs.artistTracks || [])
+        : (recs.genreTracks || []);
 
       const existingIds = new Set([baseSong.id, ...currentQ.map(s => s.id)]);
       const newTracks = [];
@@ -479,7 +502,7 @@ export default function Home() {
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#080C14] text-[#F8FAFC] select-none">
-      {/* Modern Sidebar */}
+      {/* Modern Sidebar with Mobile Drawer support */}
       <Sidebar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
@@ -488,6 +511,8 @@ export default function Home() {
         onCreateRoomQuick={handleQuickCreateRoom}
         onOpenAuth={() => setShowAuthModal(true)}
         onLogout={handleLogout}
+        isMobileOpen={isMobileSidebarOpen}
+        onCloseMobile={() => setIsMobileSidebarOpen(false)}
       />
 
       {/* Main Content Area */}
@@ -499,6 +524,7 @@ export default function Home() {
           onCreateRoomQuick={handleQuickCreateRoom}
           onLogout={handleLogout}
           onOpenAuth={() => setShowAuthModal(true)}
+          onToggleMobileSidebar={() => setIsMobileSidebarOpen((prev) => !prev)}
         />
 
         <main className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 custom-scrollbar">
@@ -590,6 +616,7 @@ export default function Home() {
         onAddToQueue={handleAddToQueue}
         onRemoveFromQueue={handleRemoveFromQueue}
         onClearQueue={handleClearQueue}
+        onRefreshQueue={handleRefreshQueue}
         autoplayMode={autoplayMode}
         setAutoplayMode={handleSetAutoplayMode}
       />
@@ -606,13 +633,17 @@ export default function Home() {
         />
       )}
 
-      {/* Live YouTube High Fidelity Ultra-Low Data Audio Engine */}
+      {/* Live YouTube High Fidelity Ultra-Low Data Audio Engine with Mobile Background Playback */}
       <YouTubeAudioEngine
         currentSong={currentSong}
         isPlaying={isPlaying}
         volume={volume}
         onTimeUpdate={(time) => setCurrentTime(Math.floor(time))}
         onEnded={handleSkipNext}
+        onTogglePlay={handleTogglePlay}
+        onSkipNext={handleSkipNext}
+        onSkipPrev={handleSkipPrev}
+        onSeek={handleSeek}
       />
     </div>
   );

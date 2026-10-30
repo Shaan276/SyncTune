@@ -1,10 +1,39 @@
 import { NextResponse } from 'next/server';
+import fs from 'fs';
+import path from 'path';
 
 export const dynamic = 'force-dynamic';
 
-// Server-side persistent accounts store
-if (!global._synctune_accounts) {
-  global._synctune_accounts = [
+const dataDir = path.join(process.cwd(), 'data');
+const usersFilePath = path.join(dataDir, 'users.json');
+
+// Ensure directory and initial file exist
+function getAccountsFromDisk() {
+  try {
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
+    if (!fs.existsSync(usersFilePath)) {
+      const defaultUsers = [
+        {
+          id: 1,
+          username: 'Piyush',
+          email: 'piyushpilkhwal74@gmail.com',
+          password: 'admin',
+          role: 'admin',
+          createdAt: '2026-08-30T00:00:00.000Z'
+        }
+      ];
+      fs.writeFileSync(usersFilePath, JSON.stringify(defaultUsers, null, 2), 'utf-8');
+      return defaultUsers;
+    }
+    const raw = fs.readFileSync(usersFilePath, 'utf-8');
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed;
+  } catch (err) {
+    console.error('Error reading users from disk:', err);
+  }
+  return [
     {
       id: 1,
       username: 'Piyush',
@@ -16,7 +45,18 @@ if (!global._synctune_accounts) {
   ];
 }
 
-const accountsStore = global._synctune_accounts;
+function saveAccountsToDisk(accounts) {
+  try {
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
+    fs.writeFileSync(usersFilePath, JSON.stringify(accounts, null, 2), 'utf-8');
+    return true;
+  } catch (err) {
+    console.error('Error saving users to disk:', err);
+    return false;
+  }
+}
 
 export async function POST(request) {
   try {
@@ -25,6 +65,9 @@ export async function POST(request) {
     const email = (body.email || '').trim().toLowerCase();
     const rawUsername = (body.username || '').trim();
     const password = body.password || '';
+
+    // Always load current persisted accounts from disk
+    const accounts = getAccountsFromDisk();
 
     // 1. REGISTER (Create New ID)
     if (action === 'register') {
@@ -38,12 +81,16 @@ export async function POST(request) {
         return NextResponse.json({ success: false, error: 'Password must be at least 3 characters long.' }, { status: 400 });
       }
 
-      // Check if email already registered
-      const existing = accountsStore.find((a) => a.email === email);
+      // Check if email or username already registered
+      const existing = accounts.find(
+        (a) => a.email.toLowerCase() === email || a.username.toLowerCase() === rawUsername.toLowerCase()
+      );
       if (existing) {
         return NextResponse.json({
           success: false,
-          error: 'An account with this email already exists. Please switch to Sign In.'
+          error: existing.email.toLowerCase() === email
+            ? 'An account with this email already exists. Please switch to Sign In.'
+            : 'This username is already taken. Please choose another.'
         }, { status: 409 });
       }
 
@@ -57,7 +104,8 @@ export async function POST(request) {
         createdAt: new Date().toISOString()
       };
 
-      accountsStore.push(newAccount);
+      accounts.push(newAccount);
+      saveAccountsToDisk(accounts);
 
       const { password: _, ...safeUser } = newAccount;
       return NextResponse.json({
@@ -75,8 +123,8 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: 'Please enter your password.' }, { status: 400 });
     }
 
-    const account = accountsStore.find(
-      (a) => a.email === email || a.username.toLowerCase() === email
+    const account = accounts.find(
+      (a) => a.email.toLowerCase() === email || a.username.toLowerCase() === email
     );
 
     // If account does NOT exist: DO NOT auto-create! Return strict error!

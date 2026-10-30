@@ -130,78 +130,17 @@ export default function DashboardView({
           <p className="text-xs text-zinc-400 flex items-center gap-2 flex-wrap">
             <span>Streamed <strong className="text-emerald-400 font-mono">{totalSongsListened}</strong> tracks</span>
             <span>•</span>
-            <span>Saved <strong className="text-emerald-400 font-mono">~{estimatedSavedMB} MB</strong> data</span>
+            <span>Listened <strong className="text-emerald-400 font-mono">{listeningTimeMinutes} min</strong></span>
             <span>•</span>
             <span className="text-zinc-500">Pure 144p audio streaming</span>
           </p>
         </div>
-
-        {/* Quick Mode Switcher */}
-        <div className="flex items-center gap-2 z-10 shrink-0 flex-wrap">
-          <button
-            onClick={() => setSubTab('flow')}
-            className={`px-4 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer ${
-              subTab === 'flow'
-                ? 'bg-emerald-500 text-black shadow-lg shadow-emerald-500/20'
-                : 'bg-[#141C30] text-zinc-400 hover:text-white border border-white/5'
-            }`}
-          >
-            <Music className="w-3.5 h-3.5" />
-            <span>Solo Flow</span>
-          </button>
-
-          <button
-            onClick={() => {
-              setSubTab('rooms');
-              onNavigateTab && onNavigateTab('rooms');
-            }}
-            className={`px-4 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer ${
-              subTab === 'rooms'
-                ? 'bg-emerald-500 text-black shadow-lg shadow-emerald-500/20'
-                : 'bg-[#141C30] text-zinc-400 hover:text-white border border-white/5'
-            }`}
-          >
-            <Radio className="w-3.5 h-3.5" />
-            <span>Live Rooms</span>
-          </button>
-
-          <button
-            onClick={() => setSubTab('discover')}
-            className={`px-4 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer ${
-              subTab === 'discover'
-                ? 'bg-emerald-500 text-black shadow-lg shadow-emerald-500/20'
-                : 'bg-[#141C30] text-zinc-400 hover:text-white border border-white/5'
-            }`}
-          >
-            <Compass className="w-3.5 h-3.5" />
-            <span>Discover</span>
-          </button>
-        </div>
       </div>
 
-      {/* 3. Real 4-Metrics Cards Grid (No hardcoded fake percentages) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Metric 1: Data Saved */}
-        <div className="p-4 rounded-xl bg-[#0F1626] border border-white/5 flex flex-col justify-between gap-3">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5 uppercase tracking-wide">
-              <Zap className="w-3.5 h-3.5" />
-              <span>DATA SAVED</span>
-            </span>
-            <span className="text-xs font-bold text-zinc-400 font-mono">{dataSavedPercent}%</span>
-          </div>
-          <div>
-            <div className="text-lg font-black text-white font-mono">
-              {estimatedSavedMB} <span className="text-xs text-zinc-500 font-normal">/ 500 MB</span>
-            </div>
-            <div className="w-full h-1.5 bg-[#080C14] rounded-full overflow-hidden mt-2">
-              <div className="h-full bg-emerald-500 rounded-full transition-all duration-500" style={{ width: `${dataSavedPercent}%` }} />
-            </div>
-          </div>
-        </div>
-
-        {/* Metric 2: Songs Played */}
-        <div className="p-4 rounded-xl bg-[#0F1626] border border-white/5 flex flex-col justify-between gap-3">
+      {/* 3. Real 2-Metrics Cards Grid (Songs Played & Minutes Listened) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {/* Metric 1: Songs Played */}
+        <div className="p-4 rounded-xl bg-[#0F1626] border border-white/5 flex flex-col justify-between gap-3 shadow-lg">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-cyan-400 flex items-center gap-1.5 uppercase tracking-wide">
               <Music className="w-3.5 h-3.5" />
@@ -224,12 +163,12 @@ export default function DashboardView({
           </div>
         </div>
 
-        {/* Metric 3: Listening Time */}
-        <div className="p-4 rounded-xl bg-[#0F1626] border border-white/5 flex flex-col justify-between gap-3">
+        {/* Metric 2: Listening Time (Minutes Listened) */}
+        <div className="p-4 rounded-xl bg-[#0F1626] border border-white/5 flex flex-col justify-between gap-3 shadow-lg">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-amber-400 flex items-center gap-1.5 uppercase tracking-wide">
               <Clock className="w-3.5 h-3.5" />
-              <span>LISTENING TIME</span>
+              <span>MINUTES LISTENED</span>
             </span>
             <span className="text-xs font-bold text-zinc-400 font-mono">
               {listeningTimePercent}%
@@ -244,25 +183,6 @@ export default function DashboardView({
                 className="h-full bg-amber-400 rounded-full transition-all duration-500"
                 style={{ width: `${listeningTimePercent}%` }}
               />
-            </div>
-          </div>
-        </div>
-
-        {/* Metric 4: Audio Fidelity */}
-        <div className="p-4 rounded-xl bg-[#0F1626] border border-white/5 flex flex-col justify-between gap-3">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-purple-400 flex items-center gap-1.5 uppercase tracking-wide">
-              <ShieldCheck className="w-3.5 h-3.5" />
-              <span>FIDELITY STREAM</span>
-            </span>
-            <span className="text-xs font-bold text-zinc-400 font-mono">144p Audio</span>
-          </div>
-          <div>
-            <div className="text-lg font-black text-white font-mono">
-              ~1.0 <span className="text-xs text-zinc-500 font-normal">MB / track avg</span>
-            </div>
-            <div className="w-full h-1.5 bg-[#080C14] rounded-full overflow-hidden mt-2">
-              <div className="h-full bg-purple-400 rounded-full" style={{ width: '100%' }} />
             </div>
           </div>
         </div>

@@ -2,6 +2,11 @@ import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 
+if (!global._synctune_search_cache) {
+  global._synctune_search_cache = new Map();
+}
+const searchCache = global._synctune_search_cache;
+
 function cleanArtistName(name) {
   if (!name) return 'YouTube Artist';
   if (name.endsWith(' - Topic')) return name.slice(0, -8);
@@ -31,9 +36,15 @@ export async function GET(request) {
     return NextResponse.json({ songs: [], total: 0 });
   }
 
-  // If search query itself is clearly non-music (like "knowledgegate channel" or "gate exam lecture"), return empty
+  // Filter non-music queries
   if (isLikelyNonMusic(query, '')) {
     return NextResponse.json({ songs: [], total: 0 });
+  }
+
+  const cacheKey = `${category}_${query.toLowerCase()}`;
+  const cached = searchCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < 30 * 60 * 1000) {
+    return NextResponse.json(cached.data);
   }
 
   try {
@@ -41,31 +52,31 @@ export async function GET(request) {
     let maxDurationSeconds = 600; // Default max 10 minutes
 
     if (category === 'mix' || category === 'mixups') {
-      // Mixups / Mashups can be of ANY length as per user requirement
-      searchQuery = `${query} mashup mix nonstop remixes`;
+      searchQuery = `${query} mashup mix nonstop remix`;
       maxDurationSeconds = Infinity;
     } else if (category === 'artist') {
-      searchQuery = `${query} songs official audio track`;
+      searchQuery = `${query} songs official audio`;
       maxDurationSeconds = 600;
     } else if (category === 'bhajan' || category === 'satsang') {
-      // Admin-only devotional category
-      searchQuery = `${query} bhajan satsang kirtan aarti devotional`;
-      maxDurationSeconds = 1200; // allow up to 20m for devotional
+      searchQuery = `${query} bhajan satsang devotional`;
+      maxDurationSeconds = 1200;
     } else {
-      // Standard 'music' category: strictly songs under 10m
-      searchQuery = `${query} song official audio music video`;
+      searchQuery = `${query} song official audio`;
       maxDurationSeconds = 600;
     }
 
     const targetUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(searchQuery)}`;
-    
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 4500);
+
     const response = await fetch(targetUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept-Language': 'en-US,en;q=0.9'
       },
-      next: { revalidate: 3600 }
+      signal: controller.signal
     });
+    clearTimeout(timeout);
 
     if (response.ok) {
       const html = await response.text();
@@ -124,16 +135,14 @@ export async function GET(request) {
           }
         }
 
-        return NextResponse.json({ songs, total: songs.length });
+        const payload = { songs, total: songs.length };
+        searchCache.set(cacheKey, { data: payload, timestamp: Date.now() });
+        return NextResponse.json(payload);
       }
     }
   } catch (err) {
-    console.error("Next.js Search API error:", err);
+    console.error("Search API error:", err);
   }
 
-  // NO FAKE DATA: If nothing found or query is not music, return empty list!
-  return NextResponse.json({
-    songs: [],
-    total: 0
-  });
+  return NextResponse.json({ songs: [], total: 0 });
 }
