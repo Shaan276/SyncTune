@@ -42,8 +42,11 @@ async function getAudioUrl(videoId) {
 
 export async function HEAD(request) {
   const { searchParams } = new URL(request.url);
-  const videoId = searchParams.get('id');
-  if (!videoId) return new Response(null, { status: 400 });
+  const rawId = searchParams.get('id');
+  if (!rawId) return new Response(null, { status: 400 });
+
+  // Strip extension hint if provided (e.g. videoId.m4a -> videoId)
+  const videoId = rawId.replace(/\.(m4a|mp3|mp4|webm)$/i, '');
 
   const audioUrl = await getAudioUrl(videoId);
   if (!audioUrl) return new Response(null, { status: 502 });
@@ -57,8 +60,10 @@ export async function HEAD(request) {
     });
 
     const headers = new Headers();
-    headers.set('Content-Type', upstreamRes.headers.get('content-type') || 'audio/mp4');
+    headers.set('Content-Type', 'audio/mp4');
     headers.set('Accept-Ranges', 'bytes');
+    headers.set('Access-Control-Allow-Origin', '*');
+    headers.set('Access-Control-Expose-Headers', 'Accept-Ranges, Content-Range, Content-Length, Content-Type');
     if (upstreamRes.headers.has('content-range')) {
       const parts = upstreamRes.headers.get('content-range').split('/');
       if (parts[1]) headers.set('Content-Length', parts[1]);
@@ -72,11 +77,14 @@ export async function HEAD(request) {
 
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
-  const videoId = searchParams.get('id');
+  const rawId = searchParams.get('id');
 
-  if (!videoId) {
+  if (!rawId) {
     return NextResponse.json({ error: 'Missing video id parameter' }, { status: 400 });
   }
+
+  // Strip extension hint if provided (e.g. videoId.m4a -> videoId)
+  const videoId = rawId.replace(/\.(m4a|mp3|mp4|webm)$/i, '');
 
   let audioUrl = await getAudioUrl(videoId);
   if (!audioUrl) {
@@ -109,8 +117,12 @@ export async function GET(request) {
     }
 
     const responseHeaders = new Headers();
-    responseHeaders.set('Content-Type', upstreamRes.headers.get('content-type') || 'audio/mp4');
+    responseHeaders.set('Content-Type', 'audio/mp4');
     responseHeaders.set('Accept-Ranges', 'bytes');
+    responseHeaders.set('Access-Control-Allow-Origin', '*');
+    responseHeaders.set('Access-Control-Allow-Headers', 'Range, Content-Type, Accept');
+    responseHeaders.set('Access-Control-Expose-Headers', 'Accept-Ranges, Content-Range, Content-Length, Content-Type');
+    
     if (upstreamRes.headers.has('content-length')) {
       responseHeaders.set('Content-Length', upstreamRes.headers.get('content-length'));
     }

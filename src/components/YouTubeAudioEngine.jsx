@@ -36,9 +36,6 @@ export default function YouTubeAudioEngine({
   const onSkipPrevRef = useRef(onSkipPrev);
   const onSeekRef = useRef(onSeek);
 
-  const audioContextRef = useRef(null);
-  const isAudioUnlockedRef = useRef(false);
-
   // Sync latest callback references
   useEffect(() => {
     onEndedRef.current = onEnded;
@@ -65,34 +62,15 @@ export default function YouTubeAudioEngine({
     onSeekRef.current = onSeek;
   }, [onSeek]);
 
-  // 1. Synchronously Unlock Audio Pipeline on User Interaction (iOS Safari & Android Chrome)
+  // 1. Synchronously Unlock Audio Pipeline on User Interaction (iOS Safari, iOS Chrome & Android Chrome)
   useEffect(() => {
     const unlockAudioSession = () => {
-      // AudioSession API for iOS
+      // AudioSession API for iOS WebKit
       if (typeof navigator !== 'undefined' && 'audioSession' in navigator) {
         try {
           navigator.audioSession.type = 'playback';
         } catch (e) {}
       }
-
-      // Unlock Web Audio API AudioContext
-      try {
-        if (!audioContextRef.current) {
-          const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-          if (AudioContextClass) {
-            const ctx = new AudioContextClass();
-            const buffer = ctx.createBuffer(1, 1, 22050);
-            const source = ctx.createBufferSource();
-            source.buffer = buffer;
-            source.connect(ctx.destination);
-            source.start(0);
-            audioContextRef.current = ctx;
-          }
-        }
-        if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
-          audioContextRef.current.resume().catch(() => {});
-        }
-      } catch (e) {}
 
       // Unlock Native HTML5 Audio
       const audio = audioRef.current;
@@ -101,15 +79,13 @@ export default function YouTubeAudioEngine({
       }
 
       // Unlock YouTube iframe fallback if active
-      if (playerRef.current && isReadyRef.current && isPlayingRef.current) {
+      if (useIframeFallbackRef.current && playerRef.current && isReadyRef.current && isPlayingRef.current) {
         try {
           playerRef.current.unMute();
           playerRef.current.setVolume(Math.floor(volume * 100));
           playerRef.current.playVideo();
         } catch (e) {}
       }
-
-      isAudioUnlockedRef.current = true;
     };
 
     window.addEventListener('touchstart', unlockAudioSession, { passive: true });
@@ -147,13 +123,9 @@ export default function YouTubeAudioEngine({
         }
       } catch (e) {}
     }
-
-    if (audioContextRef.current && isPlaying && audioContextRef.current.state === 'suspended') {
-      audioContextRef.current.resume().catch(() => {});
-    }
   }, [isPlaying, useIframeFallback, volume]);
 
-  // 3. MediaSession API integration for Lock Screen and Notification Center
+  // 3. MediaSession API integration for iOS Control Center, Lock Screen, and Android Shade
   useEffect(() => {
     if (typeof window === 'undefined' || !('mediaSession' in navigator)) return;
 
@@ -320,14 +292,11 @@ export default function YouTubeAudioEngine({
       if (audioRef.current) {
         if (songId && songId !== lastSongIdRef.current) {
           lastSongIdRef.current = songId;
-          audioRef.current.src = `/api/stream?id=${encodeURIComponent(songId)}`;
+          // Note the .m4a container suffix hint for iOS CoreMedia
+          audioRef.current.src = `/api/stream?id=${encodeURIComponent(songId)}.m4a`;
         }
         audioRef.current.volume = volume;
         audioRef.current.play().catch(() => {});
-      }
-
-      if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
-        audioContextRef.current.resume().catch(() => {});
       }
     };
 
@@ -355,9 +324,6 @@ export default function YouTubeAudioEngine({
     const handleVisibilityChange = () => {
       if (!document.hidden && isPlayingRef.current) {
         try {
-          if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
-            audioContextRef.current.resume().catch(() => {});
-          }
           if (audioRef.current && !useIframeFallbackRef.current && audioRef.current.paused) {
             audioRef.current.play().catch(() => {});
           }
@@ -396,7 +362,8 @@ export default function YouTubeAudioEngine({
       setUseIframeFallback(false);
 
       if (audioRef.current) {
-        audioRef.current.src = `/api/stream?id=${encodeURIComponent(currentSong.id)}`;
+        // Formatted with .m4a suffix for iOS WebKit CoreMedia container sniffing
+        audioRef.current.src = `/api/stream?id=${encodeURIComponent(currentSong.id)}.m4a`;
         audioRef.current.volume = volume;
         if (isPlaying) {
           audioRef.current.play().catch((err) => {
@@ -442,8 +409,9 @@ export default function YouTubeAudioEngine({
     <>
       {/* 
         Native HTML5 Audio element:
-        Plays direct audio stream from /api/stream?id=...
-        Mobile OS (Android & iOS) NEVER pauses direct HTML5 audio when pressing Home or locking screen!
+        Plays direct audio stream from /api/stream?id=...m4a
+        Rendered with active layout geometry (not display: none) so iOS WebKit and Android Blink
+        never cull or suspend the element when Chrome / Safari is backgrounded.
       */}
       <audio
         ref={audioRef}
@@ -468,7 +436,16 @@ export default function YouTubeAudioEngine({
           console.warn('[SyncTune Native Audio] Stream error, switching to fallback:', e);
           setUseIframeFallback(true);
         }}
-        style={{ display: 'none' }}
+        style={{
+          position: 'fixed',
+          bottom: 0,
+          right: 0,
+          width: '1px',
+          height: '1px',
+          opacity: 0.001,
+          pointerEvents: 'none',
+          zIndex: -1
+        }}
       />
 
       {/* Backup YouTube Iframe Engine container (only rendered if fallback is actively triggered) */}
