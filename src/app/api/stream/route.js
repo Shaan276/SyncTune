@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { Ytdl } from '@distube/ytdl-core';
-import CryptoJS from 'crypto-js';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,65 +13,7 @@ if (!global._synctune_stream_cache) {
 }
 const streamUrlCache = global._synctune_stream_cache;
 
-const DES_KEY = CryptoJS.enc.Utf8.parse('38346591');
-
-function decryptSaavnUrl(encryptedUrl) {
-  if (!encryptedUrl) return null;
-  try {
-    const decrypted = CryptoJS.DES.decrypt(
-      { ciphertext: CryptoJS.enc.Base64.parse(encryptedUrl) },
-      DES_KEY,
-      { mode: CryptoJS.mode.ECB, padding: CryptoJS.pad.Pkcs7 }
-    );
-    const url = decrypted.toString(CryptoJS.enc.Utf8);
-    if (!url || !url.startsWith('http')) return null;
-    return url.replace('_96.mp4', '_320.mp4').replace('_160.mp4', '_320.mp4');
-  } catch (e) {
-    return null;
-  }
-}
-
-async function getSaavnAudioUrl(pid) {
-  try {
-    const cleanPid = pid.replace(/^saavn_/, '');
-    const url = `https://www.jiosaavn.com/api.php?__call=song.getDetails&pids=${encodeURIComponent(cleanPid)}&_format=json&_marker=0&ctx=web6dot0&api_version=4`;
-    const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
-    if (!res.ok) return null;
-    const data = await res.json();
-    const song = data.songs?.[0];
-    if (song?.more_info?.encrypted_media_url) {
-      return decryptSaavnUrl(song.more_info.encrypted_media_url);
-    }
-  } catch (e) {}
-  return null;
-}
-
-async function searchSaavnAudioUrl(query) {
-  if (!query || !query.trim()) return null;
-  try {
-    const url = `https://www.jiosaavn.com/api.php?__call=search.getResults&q=${encodeURIComponent(query)}&_format=json&_marker=0&ctx=web6dot0&api_version=4`;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 3500);
-    const res = await fetch(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
-      signal: controller.signal
-    });
-    clearTimeout(timeout);
-    if (!res.ok) return null;
-    const data = await res.json();
-    const first = (data.results || []).find(r => r.more_info?.encrypted_media_url);
-    if (first?.more_info?.encrypted_media_url) {
-      return decryptSaavnUrl(first.more_info.encrypted_media_url);
-    }
-  } catch (e) {}
-  return null;
-}
-
 async function getAudioUrl(videoId) {
-  if (videoId.startsWith('saavn_')) {
-    return await getSaavnAudioUrl(videoId);
-  }
-
   const cached = streamUrlCache.get(videoId);
   if (cached && Date.now() - cached.timestamp < 3 * 3600 * 1000) {
     return cached.url;
@@ -82,7 +23,7 @@ async function getAudioUrl(videoId) {
     const info = await yt.getInfo(videoId);
     const audioFormats = info.formats?.filter(f => f.hasAudio && !f.hasVideo) || [];
 
-    // Prefer itag 140 (audio/mp4 m4a 128kbps AAC - universal Apple/Android support)
+    // Prefer itag 140 (audio/mp4 m4a 128kbps AAC - universal Apple iOS & Android background playback)
     let selected = audioFormats.find(f => f.itag === 140);
     if (!selected) {
       selected = audioFormats.sort((a, b) => (b.audioBitrate || b.bitrate || 0) - (a.audioBitrate || a.bitrate || 0))[0];
@@ -102,30 +43,10 @@ async function getAudioUrl(videoId) {
 export async function HEAD(request) {
   const { searchParams } = new URL(request.url);
   const rawId = searchParams.get('id');
-  const title = (searchParams.get('title') || '').trim();
-  const artist = (searchParams.get('artist') || '').trim();
-
-  // 1. Direct CDN lookup by title & artist
-  if (title) {
-    const cleanTitle = title.replace(/\(.*?\)/g, '').replace(/\[.*?\]/g, '').replace(/official|video|audio|lyrics|hd|full song/gi, '').trim();
-    const query = artist && !artist.toLowerCase().includes('artist') ? `${cleanTitle} ${artist}` : cleanTitle;
-    const cdnUrl = await searchSaavnAudioUrl(query);
-    if (cdnUrl) {
-      return NextResponse.redirect(cdnUrl, 307);
-    }
-  }
-
   if (!rawId) return new Response(null, { status: 400 });
 
   // Strip extension hint if provided (e.g. videoId.m4a -> videoId)
   const videoId = rawId.replace(/\.(m4a|mp3|mp4|webm)$/i, '');
-
-  if (videoId.startsWith('saavn_')) {
-    const cdnUrl = await getSaavnAudioUrl(videoId);
-    if (cdnUrl) {
-      return NextResponse.redirect(cdnUrl, 307);
-    }
-  }
 
   const audioUrl = await getAudioUrl(videoId);
   if (!audioUrl) return new Response(null, { status: 502 });
@@ -157,18 +78,6 @@ export async function HEAD(request) {
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const rawId = searchParams.get('id');
-  const title = (searchParams.get('title') || '').trim();
-  const artist = (searchParams.get('artist') || '').trim();
-
-  // 1. Direct CDN lookup by title & artist (Instant high-speed Akamai 320kbps CDN stream, SoundCloud model)
-  if (title) {
-    const cleanTitle = title.replace(/\(.*?\)/g, '').replace(/\[.*?\]/g, '').replace(/official|video|audio|lyrics|hd|full song/gi, '').trim();
-    const query = artist && !artist.toLowerCase().includes('artist') ? `${cleanTitle} ${artist}` : cleanTitle;
-    const cdnUrl = await searchSaavnAudioUrl(query);
-    if (cdnUrl) {
-      return NextResponse.redirect(cdnUrl, 307);
-    }
-  }
 
   if (!rawId) {
     return NextResponse.json({ error: 'Missing video id parameter' }, { status: 400 });
@@ -176,13 +85,6 @@ export async function GET(request) {
 
   // Strip extension hint if provided (e.g. videoId.m4a -> videoId)
   const videoId = rawId.replace(/\.(m4a|mp3|mp4|webm)$/i, '');
-
-  if (videoId.startsWith('saavn_')) {
-    const cdnUrl = await getSaavnAudioUrl(videoId);
-    if (cdnUrl) {
-      return NextResponse.redirect(cdnUrl, 307);
-    }
-  }
 
   let audioUrl = await getAudioUrl(videoId);
   if (!audioUrl) {

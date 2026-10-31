@@ -1,7 +1,28 @@
 'use client';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Radio, Plus, MessageSquare, ThumbsUp, Users, Play, LogOut, Search, Sparkles, Zap, ArrowRight, Copy, Check, Lock, Globe } from 'lucide-react';
+import { Radio, Plus, MessageSquare, ThumbsUp, Users, Play, LogOut, Search, Sparkles, Zap, ArrowRight, Copy, Check, Lock, Globe, Crown, Shield } from 'lucide-react';
 import { searchYouTube, fetchLiveRecommendations, formatTime } from '../../lib/youtube';
+
+function getStableUser(user) {
+  if (user && user.id) return user;
+  if (typeof window !== 'undefined') {
+    const stored = localStorage.getItem('synctune_guest_user');
+    if (stored) {
+      try {
+        return JSON.parse(stored);
+      } catch (e) {}
+    }
+    const newGuest = {
+      id: 'guest_' + Math.random().toString(36).substring(2, 9),
+      username: 'Listener_' + Math.floor(100 + Math.random() * 900)
+    };
+    try {
+      localStorage.setItem('synctune_guest_user', JSON.stringify(newGuest));
+    } catch (e) {}
+    return newGuest;
+  }
+  return { id: 'guest_listener', username: 'Listener' };
+}
 
 export default function RoomsView({
   user,
@@ -14,6 +35,7 @@ export default function RoomsView({
   const [inputCode, setInputCode] = useState('');
   const [copiedCode, setCopiedCode] = useState(false);
   const [isPrivateMode, setIsPrivateMode] = useState(false);
+  const [allowListenerControl, setAllowListenerControl] = useState(false); // false = Host Only, true = Collaborative
   const [roomSearchQuery, setRoomSearchQuery] = useState('');
   const [roomSearchResults, setRoomSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -26,11 +48,17 @@ export default function RoomsView({
   const [floatingReactions, setFloatingReactions] = useState([]);
   const [members, setMembers] = useState([]);
   const [roomHost, setRoomHost] = useState('');
+  const [roomHostId, setRoomHostId] = useState(null);
+  const [roomAllowListenerControl, setRoomAllowListenerControl] = useState(false);
   const [roomIsPrivate, setRoomIsPrivate] = useState(false);
 
   const roomSearchInputRef = useRef(null);
   const activeRoomRef = useRef(activeRoom);
   activeRoomRef.current = activeRoom;
+
+  const currentUser = getStableUser(user);
+  const isHost = activeRoom && (String(roomHostId) === String(currentUser.id) || members.some((m) => String(m.id) === String(currentUser.id) && m.isHost));
+  const canControlMusic = !activeRoom || roomAllowListenerControl || isHost;
 
   // 1. Fetch public active rooms from API
   const fetchActiveRooms = useCallback(async () => {
@@ -61,6 +89,8 @@ export default function RoomsView({
         if (data.room) {
           setMembers(data.members || []);
           setRoomHost(data.room.host_name || '');
+          setRoomHostId(data.room.host_id);
+          setRoomAllowListenerControl(data.room.allowListenerControl !== false);
           setRoomIsPrivate(Boolean(data.room.isPrivate));
           if (data.chats) setChats(data.chats);
           if (data.queueVotes) setQueueVotes(data.queueVotes);
@@ -68,7 +98,7 @@ export default function RoomsView({
           // If a song is actively playing in the room and differs from local
           if (data.currentSong && data.currentSong.id && (!currentSong || currentSong.id !== data.currentSong.id)) {
             if (onPlaySong) {
-              onPlaySong(data.currentSong);
+              onPlaySong(data.currentSong, true);
             }
           }
         }
@@ -85,15 +115,24 @@ export default function RoomsView({
 
   // 3. Create Room Handler (Guaranteed unique code & zero duplicates)
   const handleCreateNewRoom = async () => {
-    const currentUser = user || { id: Date.now(), username: 'Listener' };
+    // Stop any currently playing solo song immediately!
+    if (typeof window !== 'undefined' && window.syncTunePauseAudio) {
+      window.syncTunePauseAudio();
+    }
+    if (onPlaySong) {
+      onPlaySong(null);
+    }
+
+    const stableUser = getStableUser(user);
     try {
       const res = await fetch('/api/room', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'create',
-          user: currentUser,
-          isPrivate: isPrivateMode
+          user: stableUser,
+          isPrivate: isPrivateMode,
+          allowListenerControl: allowListenerControl
         })
       });
 
@@ -101,7 +140,9 @@ export default function RoomsView({
       if (res.ok && data && data.success && data.room) {
         setActiveRoom(data.room.code);
         setRoomHost(data.room.host_name);
-        setMembers(data.members || [{ id: currentUser.id, username: currentUser.username, isHost: true }]);
+        setRoomHostId(data.room.host_id);
+        setRoomAllowListenerControl(data.room.allowListenerControl !== false);
+        setMembers(data.members || [{ id: stableUser.id, username: stableUser.username, isHost: true }]);
         setRoomIsPrivate(isPrivateMode);
         fetchActiveRooms();
       }
@@ -113,10 +154,21 @@ export default function RoomsView({
   // 4. Join Room Handler (Instantly joins without duplicate room creation)
   const handleJoinRoom = async (codeToJoin) => {
     setJoinError('');
-    const rawCode = (codeToJoin || inputCode).toUpperCase().trim();
+    let rawCode = (codeToJoin || inputCode).toUpperCase().trim().replace(/[\s-]+/g, '');
+    if (/^\d{4}$/.test(rawCode)) {
+      rawCode = `SYNC${rawCode}`;
+    }
     if (!rawCode) return;
 
-    const currentUser = user || { id: Date.now(), username: 'Listener' };
+    // Stop any currently playing solo song immediately!
+    if (typeof window !== 'undefined' && window.syncTunePauseAudio) {
+      window.syncTunePauseAudio();
+    }
+    if (onPlaySong) {
+      onPlaySong(null);
+    }
+
+    const stableUser = getStableUser(user);
 
     try {
       const res = await fetch('/api/room', {
@@ -125,7 +177,7 @@ export default function RoomsView({
         body: JSON.stringify({
           action: 'join',
           code: rawCode,
-          user: currentUser
+          user: stableUser
         })
       });
 
@@ -134,12 +186,14 @@ export default function RoomsView({
         setActiveRoom(data.room.code);
         setInputCode('');
         setRoomHost(data.room.host_name);
+        setRoomHostId(data.room.host_id);
+        setRoomAllowListenerControl(data.room.allowListenerControl !== false);
         setMembers(data.members || []);
         setRoomIsPrivate(Boolean(data.room.isPrivate));
 
-        // Immediately start listening if host is playing a track!
-        if (data.currentSong && onPlaySong) {
-          onPlaySong(data.currentSong);
+        // Immediately start listening if room has an active song playing!
+        if (data.currentSong && data.isPlaying && onPlaySong) {
+          onPlaySong(data.currentSong, true);
         }
       } else {
         setJoinError(data?.error || `Room "${rawCode}" does not exist.`);
@@ -153,7 +207,7 @@ export default function RoomsView({
   const handleLeaveRoom = async () => {
     if (!activeRoom) return;
     const code = activeRoom;
-    const currentUser = user || { id: Date.now(), username: 'Listener' };
+    const stableUser = getStableUser(user);
 
     try {
       await fetch('/api/room', {
@@ -162,7 +216,7 @@ export default function RoomsView({
         body: JSON.stringify({
           action: 'leave',
           code,
-          user: currentUser
+          user: stableUser
         })
       });
     } catch (e) {}
@@ -177,6 +231,11 @@ export default function RoomsView({
   // 6. Play song inside room & sync
   const handlePlaySongInRoom = async (song) => {
     if (!song) return;
+    if (!canControlMusic) {
+      setJoinError('🔒 Only the room host can change or play songs in this room.');
+      setTimeout(() => setJoinError(''), 4000);
+      return;
+    }
     onPlaySong(song);
 
     if (activeRoom) {
@@ -188,7 +247,8 @@ export default function RoomsView({
             action: 'play',
             code: activeRoom,
             song,
-            currentTime: 0
+            currentTime: 0,
+            user: stableUser
           })
         });
       } catch (e) {}
@@ -341,6 +401,36 @@ export default function RoomsView({
         <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto">
           {!activeRoom ? (
             <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+              {/* Listener Control Permission Selector */}
+              <div className="flex p-0.5 rounded-xl bg-[#080C14] border border-white/10 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setAllowListenerControl(false)}
+                  className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                    !allowListenerControl
+                      ? 'bg-amber-500 text-black shadow-sm font-extrabold'
+                      : 'text-zinc-400 hover:text-white'
+                  }`}
+                  title="Only Host can play, pause, and manage music"
+                >
+                  <Crown className="w-3.5 h-3.5" />
+                  <span>Host Only</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAllowListenerControl(true)}
+                  className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                    allowListenerControl
+                      ? 'bg-emerald-500 text-black shadow-sm font-extrabold'
+                      : 'text-zinc-400 hover:text-white'
+                  }`}
+                  title="Everyone in the room can play, pause, and manage music"
+                >
+                  <Users className="w-3.5 h-3.5" />
+                  <span>Everyone</span>
+                </button>
+              </div>
+
               {/* Public vs Private Selector */}
               <div className="flex p-0.5 rounded-xl bg-[#080C14] border border-white/10 shrink-0">
                 <button
@@ -390,10 +480,10 @@ export default function RoomsView({
               >
                 <input
                   type="text"
-                  placeholder="Room Code..."
+                  placeholder="SYNC1962 / Code..."
                   value={inputCode}
                   onChange={(e) => { setInputCode(e.target.value); setJoinError(''); }}
-                  className="px-3 py-2 rounded-xl bg-[#080C14] border border-white/10 text-xs text-white uppercase outline-none focus:border-emerald-500/50 w-28 sm:w-32"
+                  className="px-3 py-2 rounded-xl bg-[#080C14] border border-white/10 text-xs text-white uppercase outline-none focus:border-emerald-500/50 w-28 sm:w-36"
                 />
                 <button
                   type="submit"
@@ -445,13 +535,19 @@ export default function RoomsView({
                     {activeRoom}
                   </div>
                   <div className="flex flex-col min-w-0">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <h3 className="text-base font-black text-white truncate">Listening Room {activeRoom}</h3>
                       <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase flex items-center gap-1 ${
                         roomIsPrivate ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
                       }`}>
                         {roomIsPrivate ? <Lock className="w-3 h-3" /> : <Globe className="w-3 h-3" />}
                         <span>{roomIsPrivate ? 'Private' : 'Public'}</span>
+                      </span>
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase flex items-center gap-1 ${
+                        roomAllowListenerControl ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30' : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                      }`}>
+                        {roomAllowListenerControl ? <Users className="w-3 h-3" /> : <Crown className="w-3 h-3" />}
+                        <span>{roomAllowListenerControl ? 'Everyone Controls' : 'Host Controls Only'}</span>
                       </span>
                     </div>
                     <p className="text-xs text-zinc-400 truncate">Host: <strong className="text-white">{roomHost || user?.username || 'Host'}</strong></p>
@@ -463,6 +559,13 @@ export default function RoomsView({
                   <span>Live Synchronized</span>
                 </div>
               </div>
+
+              {!canControlMusic && (
+                <div className="p-3 px-4 rounded-xl bg-amber-500/10 border border-amber-500/25 flex items-center gap-2.5 text-xs text-amber-300">
+                  <Crown className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span><strong>Host Controls Only:</strong> Playback is managed by {roomHost || 'the host'}. You can listen in real-time, chat, react with emojis, and upvote songs!</span>
+                </div>
+              )}
 
               {/* Inside-Room Track Search Bar (Full Click-to-Focus Area) */}
               <form onSubmit={handleRoomSearch} className="flex flex-col gap-2">
@@ -513,14 +616,20 @@ export default function RoomsView({
                         </div>
                         <button
                           type="button"
+                          disabled={!canControlMusic}
                           onClick={() => {
                             handlePlaySongInRoom(song);
                             setRoomSearchResults([]);
                           }}
-                          className="px-3 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 text-xs font-bold flex items-center gap-1 cursor-pointer shrink-0"
+                          className={`px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1 shrink-0 transition-colors ${
+                            canControlMusic
+                              ? 'bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 cursor-pointer'
+                              : 'bg-white/5 text-zinc-500 cursor-not-allowed opacity-60'
+                          }`}
+                          title={canControlMusic ? 'Play in Room' : 'Only host can control music in this room'}
                         >
                           <Play className="w-3 h-3 fill-current" />
-                          <span>Play in Room</span>
+                          <span>{canControlMusic ? 'Play in Room' : 'Host Only'}</span>
                         </button>
                       </div>
                     ))}
@@ -571,9 +680,14 @@ export default function RoomsView({
                               <span>{votes}</span>
                             </button>
                             <button
+                              disabled={!canControlMusic}
                               onClick={() => handlePlaySongInRoom(song)}
-                              className="p-1.5 rounded-lg bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 transition-colors cursor-pointer"
-                              title="Play in Room"
+                              className={`p-1.5 rounded-lg transition-colors ${
+                                canControlMusic
+                                  ? 'bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 cursor-pointer'
+                                  : 'bg-white/5 text-zinc-500 cursor-not-allowed opacity-60'
+                              }`}
+                              title={canControlMusic ? 'Play in Room' : 'Only host can control music in this room'}
                             >
                               <Play className="w-3.5 h-3.5 fill-current ml-0.5" />
                             </button>
@@ -697,10 +811,19 @@ export default function RoomsView({
                     <span className="px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 font-mono font-black text-xs">
                       {room.code}
                     </span>
-                    <span className="text-[11px] text-zinc-400 flex items-center gap-1 font-semibold">
-                      <Users className="w-3.5 h-3.5 text-zinc-500" />
-                      <span>{room.member_count || 1} listeners</span>
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded border font-bold ${
+                        room.allowListenerControl
+                          ? 'text-blue-300 bg-blue-500/10 border-blue-500/20'
+                          : 'text-amber-300 bg-amber-500/10 border-amber-500/20'
+                      }`}>
+                        {room.allowListenerControl ? 'Collaborative' : 'Host Only'}
+                      </span>
+                      <span className="text-[11px] text-zinc-400 flex items-center gap-1 font-semibold">
+                        <Users className="w-3.5 h-3.5 text-zinc-500" />
+                        <span>{room.member_count || 1}</span>
+                      </span>
+                    </div>
                   </div>
 
                   <div className="flex flex-col gap-1 min-w-0">

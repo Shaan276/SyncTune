@@ -16,6 +16,27 @@ import AdminView from '../components/views/AdminView';
 
 import { searchYouTube, recordSongPlay, fetchLiveRecommendations } from '../lib/youtube';
 
+function getStableUser(user) {
+  if (user && user.id) return user;
+  if (typeof window !== 'undefined') {
+    const stored = localStorage.getItem('synctune_guest_user');
+    if (stored) {
+      try {
+        return JSON.parse(stored);
+      } catch (e) {}
+    }
+    const newGuest = {
+      id: 'guest_' + Math.random().toString(36).substring(2, 9),
+      username: 'Listener_' + Math.floor(100 + Math.random() * 900)
+    };
+    try {
+      localStorage.setItem('synctune_guest_user', JSON.stringify(newGuest));
+    } catch (e) {}
+    return newGuest;
+  }
+  return { id: 'guest_listener', username: 'Listener' };
+}
+
 export default function Home() {
   const [user, setUser] = useState(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
@@ -23,6 +44,7 @@ export default function Home() {
 
   const [activeTab, setActiveTab] = useState('dashboard');
   const [activeRoom, setActiveRoom] = useState(null);
+  const [activeRoomMeta, setActiveRoomMeta] = useState(null);
 
   // Playback & Queue state
   const [currentSong, setCurrentSong] = useState(null);
@@ -57,6 +79,31 @@ export default function Home() {
   activeRoomRef.current = activeRoom;
   const userRef = useRef(user);
   userRef.current = user;
+
+  const currentUser = getStableUser(user);
+  const isRoomHost = Boolean(
+    activeRoom && activeRoomMeta && (
+      String(activeRoomMeta.host_id) === String(currentUser.id) ||
+      (activeRoomMeta.members || []).some((m) => String(m.id) === String(currentUser.id) && m.isHost)
+    )
+  );
+  const canControlMusic = !activeRoom || !activeRoomMeta || activeRoomMeta.allowListenerControl !== false || isRoomHost;
+  const canControlMusicRef = useRef(canControlMusic);
+  canControlMusicRef.current = canControlMusic;
+
+  const handleSetActiveRoom = useCallback((roomCode) => {
+    if (roomCode && roomCode !== activeRoomRef.current) {
+      // Immediately stop current solo song when host or joiner enters a room!
+      setIsPlaying(false);
+      if (typeof window !== 'undefined' && window.syncTunePauseAudio) {
+        window.syncTunePauseAudio();
+      }
+      setCurrentSong(null);
+      setCurrentTime(0);
+      setActiveRoomMeta(null);
+    }
+    setActiveRoom(roomCode);
+  }, []);
 
   // Hydrate user session, history & queue from localStorage
   useEffect(() => {
@@ -235,6 +282,7 @@ export default function Home() {
 
     // If active in a room and not triggered by incoming room sync, broadcast play to room!
     if (activeRoomRef.current && !isFromRoomSync) {
+      if (!canControlMusicRef.current) return;
       fetch('/api/room', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -243,7 +291,7 @@ export default function Home() {
           code: activeRoomRef.current,
           song: songToPlay,
           currentTime: 0,
-          user: userRef.current
+          user: getStableUser(userRef.current)
         })
       }).catch(() => {});
     }
@@ -287,7 +335,10 @@ export default function Home() {
 
   // Global Real-Time Room Synchronizer (Synchronizes across all devices & tabs)
   useEffect(() => {
-    if (!activeRoom) return;
+    if (!activeRoom) {
+      setActiveRoomMeta(null);
+      return;
+    }
     let isCancelled = false;
 
     const syncRoom = async () => {
@@ -296,6 +347,8 @@ export default function Home() {
         if (!res.ok) return;
         const data = await res.json();
         if (isCancelled || !data || !data.room) return;
+
+        setActiveRoomMeta(data.room);
 
         const roomSong = data.room.currentSong;
         const roomPlaying = Boolean(data.room.isPlaying);
@@ -306,6 +359,15 @@ export default function Home() {
           if (!currentSongRef.current || currentSongRef.current.id !== roomSong.id) {
             handlePlaySong(roomSong, true);
           }
+        } else {
+          // If room has NO song playing, clear local solo song so it does not persist into room!
+          if (currentSongRef.current) {
+            setCurrentSong(null);
+            setIsPlaying(false);
+            if (typeof window !== 'undefined' && window.syncTunePauseAudio) {
+              window.syncTunePauseAudio();
+            }
+          }
         }
 
         // 2. Synchronize Play / Pause State
@@ -313,11 +375,13 @@ export default function Home() {
           setIsPlaying(roomPlaying);
           if (roomPlaying) {
             window.syncTunePlayAudio?.(roomSong?.id, roomSong?.audioUrl, roomSong?.title, roomSong?.artist);
+          } else {
+            window.syncTunePauseAudio?.();
           }
         }
 
-        // 3. Drift Correction (> 4 seconds drift)
-        if (Math.abs(roomTime - currentTimeRef.current) > 4) {
+        // 3. Drift Correction (> 3 seconds drift)
+        if (roomPlaying && Math.abs(roomTime - currentTimeRef.current) > 3) {
           setCurrentTime(roomTime);
           window.syncTuneSeekAudio?.(roomTime);
         }
@@ -335,6 +399,7 @@ export default function Home() {
 
   // Rolling Queue Skip Next: Pop 1, Play 1, Fetch 1 new vibe track to maintain 10 songs!
   const handleSkipNext = useCallback(() => {
+    if (activeRoomRef.current && !canControlMusicRef.current) return;
     // 1. Loop Check: If loop song is ON, repeat the track
     if (isLoopingRef.current && currentSongRef.current) {
       setCurrentTime(0);
@@ -392,6 +457,7 @@ export default function Home() {
   }, [handlePlaySong]);
 
   const handleSkipPrev = useCallback(() => {
+    if (activeRoomRef.current && !canControlMusicRef.current) return;
     if (!currentSong || history.length <= 1) return;
     const currentIndex = history.findIndex((s) => s.id === currentSong.id);
     let targetSong = null;
@@ -451,6 +517,7 @@ export default function Home() {
   }, []);
 
   const handleDirectPlay = useCallback(() => {
+    if (activeRoomRef.current && !canControlMusicRef.current) return;
     setIsPlaying(true);
     if (typeof window !== 'undefined' && window.syncTunePlayAudio) {
       window.syncTunePlayAudio(currentSongRef.current?.id, currentSongRef.current?.audioUrl, currentSongRef.current?.title, currentSongRef.current?.artist);
@@ -463,13 +530,14 @@ export default function Home() {
           action: 'resume',
           code: activeRoomRef.current,
           currentTime: currentTimeRef.current,
-          user: userRef.current
+          user: getStableUser(userRef.current)
         })
       }).catch(() => {});
     }
   }, []);
 
   const handleDirectPause = useCallback(() => {
+    if (activeRoomRef.current && !canControlMusicRef.current) return;
     setIsPlaying(false);
     if (activeRoomRef.current) {
       fetch('/api/room', {
@@ -479,13 +547,14 @@ export default function Home() {
           action: 'pause',
           code: activeRoomRef.current,
           currentTime: currentTimeRef.current,
-          user: userRef.current
+          user: getStableUser(userRef.current)
         })
       }).catch(() => {});
     }
   }, []);
 
   const handleTogglePlay = useCallback(() => {
+    if (activeRoomRef.current && !canControlMusicRef.current) return;
     setIsPlaying((prev) => {
       const next = !prev;
       if (next && typeof window !== 'undefined' && window.syncTunePlayAudio) {
@@ -500,7 +569,7 @@ export default function Home() {
             action: next ? 'resume' : 'pause',
             code: activeRoomRef.current,
             currentTime: currentTimeRef.current,
-            user: userRef.current
+            user: getStableUser(userRef.current)
           })
         }).catch(() => {});
       }
@@ -509,6 +578,7 @@ export default function Home() {
   }, []);
 
   const handleSeek = useCallback((newTime) => {
+    if (activeRoomRef.current && !canControlMusicRef.current) return;
     setCurrentTime(newTime);
     if (typeof window !== 'undefined' && window.syncTuneSeekAudio) {
       window.syncTuneSeekAudio(newTime);
@@ -522,7 +592,7 @@ export default function Home() {
           action: 'seek',
           code: activeRoomRef.current,
           currentTime: newTime,
-          user: userRef.current
+          user: getStableUser(userRef.current)
         })
       }).catch(() => {});
     }
@@ -545,7 +615,7 @@ export default function Home() {
     localStorage.removeItem('token');
     setUser(null);
     setActiveTab('dashboard');
-    setActiveRoom(null);
+    handleSetActiveRoom(null);
     setIsPlaying(false);
     setShowAuthModal(true);
   };
@@ -556,23 +626,32 @@ export default function Home() {
   };
 
   const handleQuickCreateRoom = useCallback(async () => {
+    // 1. Immediately stop current solo song when entering room
+    setIsPlaying(false);
+    if (typeof window !== 'undefined' && window.syncTunePauseAudio) {
+      window.syncTunePauseAudio();
+    }
+    setCurrentSong(null);
+    setCurrentTime(0);
     setActiveTab('rooms');
     try {
+      const stableUser = getStableUser(userRef.current);
       const res = await fetch('/api/room', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'create',
-          user: userRef.current,
-          isPrivate: false
+          user: stableUser,
+          isPrivate: false,
+          allowListenerControl: false
         })
       });
       const data = await res.json().catch(() => null);
       if (data && data.room) {
-        setActiveRoom(data.room.code);
+        handleSetActiveRoom(data.room.code);
       }
     } catch (e) {}
-  }, []);
+  }, [handleSetActiveRoom]);
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#080C14] text-[#F8FAFC] select-none">
@@ -621,7 +700,7 @@ export default function Home() {
             <RoomsView
               user={user}
               activeRoom={activeRoom}
-              setActiveRoom={setActiveRoom}
+              setActiveRoom={handleSetActiveRoom}
               currentSong={currentSong}
               onPlaySong={handlePlaySong}
             />
@@ -638,7 +717,7 @@ export default function Home() {
           {activeTab === 'friends' && (
             <FriendsView
               user={user}
-              setActiveRoom={setActiveRoom}
+              setActiveRoom={handleSetActiveRoom}
               setActiveTab={setActiveTab}
             />
           )}
@@ -647,7 +726,7 @@ export default function Home() {
             <AdminView
               user={user}
               activeRoom={activeRoom}
-              setActiveRoom={setActiveRoom}
+              setActiveRoom={handleSetActiveRoom}
             />
           )}
         </main>
@@ -674,6 +753,7 @@ export default function Home() {
         isQueueOpen={isQueueOpen}
         isLooping={isLooping}
         onToggleLoop={() => setIsLooping(!isLooping)}
+        isReadOnly={!canControlMusic}
       />
 
       {/* Slide-out Queue Drawer with Top Autoplay Preference */}

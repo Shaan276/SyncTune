@@ -22,13 +22,30 @@ export default function PlayerFooter({
   onToggleQueue,
   isQueueOpen,
   isLooping = false,
-  onToggleLoop
+  onToggleLoop,
+  isReadOnly = false
 }) {
   const [isMuted, setIsMuted] = useState(false);
   const isLiked = currentSong && likedSongs.some((s) => s.id === currentSong.id);
-  const handlePlayClick = onTogglePlay || onPlayPause;
+  
+  const handlePlayClick = () => {
+    if (isReadOnly) return;
+    if (onTogglePlay) onTogglePlay();
+    else if (onPlayPause) onPlayPause();
+  };
+
+  const handleSkipNextClick = () => {
+    if (isReadOnly) return;
+    if (onSkipNext) onSkipNext();
+  };
+
+  const handleSkipPrevClick = () => {
+    if (isReadOnly) return;
+    if (onSkipPrev) onSkipPrev();
+  };
 
   const handleSliderSeek = (e) => {
+    if (isReadOnly) return;
     const newSec = parseFloat(e.target.value);
     if (onSeek) {
       onSeek(newSec);
@@ -108,26 +125,32 @@ export default function PlayerFooter({
             </button>
 
             <button
-              onClick={onSkipPrev}
-              disabled={history.length <= 1}
+              onClick={handleSkipPrevClick}
+              disabled={isReadOnly || history.length <= 1}
               className="text-zinc-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
-              title="Previous Track"
+              title={isReadOnly ? 'Only host can control music' : 'Previous Track'}
             >
               <SkipBack className="w-4 h-4" />
             </button>
 
             <button
               onClick={handlePlayClick}
-              className="w-10 h-10 rounded-full bg-emerald-500 hover:bg-emerald-400 text-black flex items-center justify-center shadow-lg shadow-emerald-500/25 hover:scale-105 active:scale-95 transition-all cursor-pointer font-bold shrink-0"
-              title={isPlaying ? 'Pause' : 'Play'}
+              disabled={isReadOnly}
+              className={`w-10 h-10 rounded-full flex items-center justify-center font-bold shrink-0 transition-all ${
+                isReadOnly
+                  ? 'bg-amber-500/80 text-black cursor-not-allowed opacity-75'
+                  : 'bg-emerald-500 hover:bg-emerald-400 text-black shadow-lg shadow-emerald-500/25 hover:scale-105 active:scale-95 cursor-pointer'
+              }`}
+              title={isReadOnly ? 'Music is controlled by room host' : (isPlaying ? 'Pause' : 'Play')}
             >
               {isPlaying ? <Pause className="w-4 h-4 fill-black" /> : <Play className="w-4 h-4 ml-0.5 fill-black" />}
             </button>
 
             <button
-              onClick={onSkipNext}
-              className="text-zinc-400 hover:text-white transition-colors cursor-pointer"
-              title="Next Track"
+              onClick={handleSkipNextClick}
+              disabled={isReadOnly}
+              className="text-zinc-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+              title={isReadOnly ? 'Only host can control music' : 'Next Track'}
             >
               <SkipForward className="w-4 h-4" />
             </button>
@@ -184,10 +207,10 @@ export default function PlayerFooter({
         <div className="flex sm:hidden items-center gap-1.5 shrink-0">
           {/* Mobile Skip Previous */}
           <button
-            onClick={onSkipPrev}
-            disabled={!history || history.length <= 1}
+            onClick={handleSkipPrevClick}
+            disabled={isReadOnly || !history || history.length <= 1}
             className="p-1.5 text-zinc-300 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
-            title="Previous Track"
+            title={isReadOnly ? 'Only host can control music' : 'Previous Track'}
           >
             <SkipBack className="w-4 h-4" />
           </button>
@@ -195,17 +218,23 @@ export default function PlayerFooter({
           {/* Mobile Big Play/Pause Button */}
           <button
             onClick={handlePlayClick}
-            className="w-9 h-9 rounded-full bg-emerald-500 hover:bg-emerald-400 text-black flex items-center justify-center shadow-md shadow-emerald-500/25 active:scale-95 transition-all cursor-pointer shrink-0"
-            title={isPlaying ? 'Pause' : 'Play'}
+            disabled={isReadOnly}
+            className={`w-9 h-9 rounded-full flex items-center justify-center transition-all shrink-0 ${
+              isReadOnly
+                ? 'bg-amber-500/80 text-black cursor-not-allowed opacity-75'
+                : 'bg-emerald-500 hover:bg-emerald-400 text-black shadow-md shadow-emerald-500/25 active:scale-95 cursor-pointer'
+            }`}
+            title={isReadOnly ? 'Music is controlled by room host' : (isPlaying ? 'Pause' : 'Play')}
           >
             {isPlaying ? <Pause className="w-4 h-4 fill-black" /> : <Play className="w-4 h-4 ml-0.5 fill-black" />}
           </button>
 
           {/* Mobile Skip Next */}
           <button
-            onClick={onSkipNext}
-            className="p-1.5 text-zinc-300 hover:text-white transition-colors cursor-pointer"
-            title="Next Track"
+            onClick={handleSkipNextClick}
+            disabled={isReadOnly}
+            className="p-1.5 text-zinc-300 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+            title={isReadOnly ? 'Only host can control music' : 'Next Track'}
           >
             <SkipForward className="w-4 h-4" />
           </button>

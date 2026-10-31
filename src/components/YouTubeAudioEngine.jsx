@@ -330,7 +330,10 @@ export default function YouTubeAudioEngine({
       if (audioRef.current) {
         if (songId && songId !== lastSongIdRef.current) {
           lastSongIdRef.current = songId;
-          const targetSrc = directAudioUrl || (currentSong?.audioUrl) || `/api/stream?id=${encodeURIComponent(songId)}&title=${encodeURIComponent(title || currentSong?.title || '')}&artist=${encodeURIComponent(artist || currentSong?.artist || '')}`;
+          lastPlayTriggerRef.current = Date.now();
+          const targetSrc = (directAudioUrl && typeof directAudioUrl === 'string' && directAudioUrl.startsWith('http'))
+            ? directAudioUrl
+            : `/api/stream?id=${encodeURIComponent(songId)}`;
           audioRef.current.src = targetSrc;
         }
         audioRef.current.volume = volume;
@@ -404,7 +407,9 @@ export default function YouTubeAudioEngine({
       setUseIframeFallback(false);
 
       if (audioRef.current) {
-        const targetSrc = currentSong.audioUrl || `/api/stream?id=${encodeURIComponent(currentSong.id)}&title=${encodeURIComponent(currentSong.title || '')}&artist=${encodeURIComponent(currentSong.artist || '')}`;
+        const targetSrc = (currentSong.audioUrl && typeof currentSong.audioUrl === 'string' && currentSong.audioUrl.startsWith('http'))
+          ? currentSong.audioUrl
+          : `/api/stream?id=${encodeURIComponent(currentSong.id)}`;
         audioRef.current.src = targetSrc;
         audioRef.current.volume = volume;
         if (isPlaying) {
