@@ -35,6 +35,7 @@ async function getAudioUrl(videoId) {
     }
   } catch (err) {
     console.error(`[Stream API] Error fetching stream for ${videoId}:`, err.message);
+    global._synctune_last_error = err.message || String(err);
   }
 
   return null;
@@ -88,7 +89,7 @@ export async function GET(request) {
 
   let audioUrl = await getAudioUrl(videoId);
   if (!audioUrl) {
-    return NextResponse.json({ error: 'Failed to extract audio stream' }, { status: 502 });
+    return NextResponse.json({ error: 'Failed to extract audio stream', lastError: global._synctune_last_error || 'unknown' }, { status: 502 });
   }
 
   const rangeHeader = request.headers.get('range');
