@@ -1,7 +1,81 @@
 'use client';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Radio, Plus, MessageSquare, ThumbsUp, Users, Play, LogOut, Search, Sparkles, Zap, ArrowRight, Copy, Check, Lock, Globe, Crown, Shield } from 'lucide-react';
+import { Radio, Plus, MessageSquare, ThumbsUp, Users, Play, LogOut, Search, Sparkles, Zap, ArrowRight, Copy, Check, Lock, Crown, Shield, Music2 } from 'lucide-react';
 import { searchYouTube, fetchLiveRecommendations, formatTime } from '../../lib/youtube';
+
+// Curated high-energy predefined queue so the room is never empty
+const DEFAULT_ROOM_QUEUE = [
+  {
+    id: '7wtfhZwyrcc',
+    title: 'Believer',
+    artist: 'Imagine Dragons',
+    thumbnail: 'https://img.youtube.com/vi/7wtfhZwyrcc/mqdefault.jpg',
+    duration: 204
+  },
+  {
+    id: '4NRXx6U8ABQ',
+    title: 'Blinding Lights',
+    artist: 'The Weeknd',
+    thumbnail: 'https://img.youtube.com/vi/4NRXx6U8ABQ/mqdefault.jpg',
+    duration: 200
+  },
+  {
+    id: 'fJ9rUzIMcZQ',
+    title: 'Bohemian Rhapsody',
+    artist: 'Queen',
+    thumbnail: 'https://img.youtube.com/vi/fJ9rUzIMcZQ/mqdefault.jpg',
+    duration: 359
+  },
+  {
+    id: 'JGwWNGJdvx8',
+    title: 'Shape of You',
+    artist: 'Ed Sheeran',
+    thumbnail: 'https://img.youtube.com/vi/JGwWNGJdvx8/mqdefault.jpg',
+    duration: 233
+  },
+  {
+    id: 'TUVcZfQe-Kw',
+    title: 'Levitating',
+    artist: 'Dua Lipa',
+    thumbnail: 'https://img.youtube.com/vi/TUVcZfQe-Kw/mqdefault.jpg',
+    duration: 203
+  },
+  {
+    id: 'H5v3kku4y6Q',
+    title: 'As It Was',
+    artist: 'Harry Styles',
+    thumbnail: 'https://img.youtube.com/vi/H5v3kku4y6Q/mqdefault.jpg',
+    duration: 167
+  },
+  {
+    id: 'kTJczUoc268',
+    title: 'Stay',
+    artist: 'The Kid LAROI & Justin Bieber',
+    thumbnail: 'https://img.youtube.com/vi/kTJczUoc268/mqdefault.jpg',
+    duration: 141
+  },
+  {
+    id: 'hT_nvWreIhg',
+    title: 'One Love',
+    artist: 'Shubh',
+    thumbnail: 'https://img.youtube.com/vi/hT_nvWreIhg/mqdefault.jpg',
+    duration: 160
+  },
+  {
+    id: 'syFZfO_wfMQ',
+    title: 'Night Changes',
+    artist: 'One Direction',
+    thumbnail: 'https://img.youtube.com/vi/syFZfO_wfMQ/mqdefault.jpg',
+    duration: 220
+  },
+  {
+    id: 'A66TYFbgYAM',
+    title: 'Softly',
+    artist: 'Karan Aujla',
+    thumbnail: 'https://img.youtube.com/vi/A66TYFbgYAM/mqdefault.jpg',
+    duration: 154
+  }
+];
 
 function getStableUser(user) {
   if (user && user.id) return user;
@@ -31,10 +105,8 @@ export default function RoomsView({
   currentSong,
   onPlaySong
 }) {
-  const [rooms, setRooms] = useState([]);
   const [inputCode, setInputCode] = useState('');
   const [copiedCode, setCopiedCode] = useState(false);
-  const [isPrivateMode, setIsPrivateMode] = useState(false);
   const [allowListenerControl, setAllowListenerControl] = useState(false); // false = Host Only, true = Collaborative
   const [roomSearchQuery, setRoomSearchQuery] = useState('');
   const [roomSearchResults, setRoomSearchResults] = useState([]);
@@ -44,15 +116,15 @@ export default function RoomsView({
   const [chatMsg, setChatMsg] = useState('');
   const [chats, setChats] = useState([]);
   const [queueVotes, setQueueVotes] = useState({});
-  const [roomRecommendations, setRoomRecommendations] = useState([]);
+  const [roomRecommendations, setRoomRecommendations] = useState(DEFAULT_ROOM_QUEUE);
   const [floatingReactions, setFloatingReactions] = useState([]);
   const [members, setMembers] = useState([]);
   const [roomHost, setRoomHost] = useState('');
   const [roomHostId, setRoomHostId] = useState(null);
   const [roomAllowListenerControl, setRoomAllowListenerControl] = useState(false);
-  const [roomIsPrivate, setRoomIsPrivate] = useState(false);
 
   const roomSearchInputRef = useRef(null);
+  const chatBottomRef = useRef(null);
   const activeRoomRef = useRef(activeRoom);
   activeRoomRef.current = activeRoom;
 
@@ -60,24 +132,12 @@ export default function RoomsView({
   const isHost = activeRoom && (String(roomHostId) === String(currentUser.id) || members.some((m) => String(m.id) === String(currentUser.id) && m.isHost));
   const canControlMusic = !activeRoom || roomAllowListenerControl || isHost;
 
-  // 1. Fetch public active rooms from API
-  const fetchActiveRooms = useCallback(async () => {
-    try {
-      const res = await fetch('/api/room?action=list');
-      if (res.ok) {
-        const data = await res.json();
-        setRooms(data.rooms || []);
-      }
-    } catch (e) {}
-  }, []);
-
+  // Auto-scroll chat to latest message
   useEffect(() => {
-    fetchActiveRooms();
-    const interval = setInterval(fetchActiveRooms, 3000);
-    return () => clearInterval(interval);
-  }, [fetchActiveRooms]);
+    chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chats]);
 
-  // 2. Fetch and Sync Active Room State
+  // 1. Fetch and Sync Active Room State
   const syncRoomState = useCallback(async (codeToSync) => {
     const code = codeToSync || activeRoomRef.current;
     if (!code) return;
@@ -91,8 +151,15 @@ export default function RoomsView({
           setRoomHost(data.room.host_name || '');
           setRoomHostId(data.room.host_id);
           setRoomAllowListenerControl(data.room.allowListenerControl !== false);
-          setRoomIsPrivate(Boolean(data.room.isPrivate));
-          if (data.chats) setChats(data.chats);
+
+          if (data.chats && Array.isArray(data.chats)) {
+            setChats((prev) => {
+              const remoteIds = new Set(data.chats.map((c) => String(c.id)));
+              const localPending = prev.filter((c) => c.isLocal && !remoteIds.has(String(c.id)));
+              return [...data.chats, ...localPending];
+            });
+          }
+
           if (data.queueVotes) setQueueVotes(data.queueVotes);
 
           // If a song is actively playing in the room and differs from local
@@ -113,7 +180,7 @@ export default function RoomsView({
     return () => clearInterval(pollTimer);
   }, [activeRoom, syncRoomState]);
 
-  // 3. Create Room Handler (Guaranteed unique code & zero duplicates)
+  // 2. Create Room Handler (Always Private, simple code like SYNC1962)
   const handleCreateNewRoom = async () => {
     // Stop any currently playing solo song immediately!
     if (typeof window !== 'undefined' && window.syncTunePauseAudio) {
@@ -131,7 +198,7 @@ export default function RoomsView({
         body: JSON.stringify({
           action: 'create',
           user: stableUser,
-          isPrivate: isPrivateMode,
+          isPrivate: true,
           allowListenerControl: allowListenerControl
         })
       });
@@ -143,15 +210,14 @@ export default function RoomsView({
         setRoomHostId(data.room.host_id);
         setRoomAllowListenerControl(data.room.allowListenerControl !== false);
         setMembers(data.members || [{ id: stableUser.id, username: stableUser.username, isHost: true }]);
-        setRoomIsPrivate(isPrivateMode);
-        fetchActiveRooms();
+        setRoomRecommendations(DEFAULT_ROOM_QUEUE);
       }
     } catch (err) {
       console.error("Create room error:", err);
     }
   };
 
-  // 4. Join Room Handler (Instantly joins without duplicate room creation)
+  // 3. Join Room Handler (Instantly joins without duplicate room creation)
   const handleJoinRoom = async (codeToJoin) => {
     setJoinError('');
     let rawCode = (codeToJoin || inputCode).toUpperCase().trim().replace(/[\s-]+/g, '');
@@ -189,21 +255,23 @@ export default function RoomsView({
         setRoomHostId(data.room.host_id);
         setRoomAllowListenerControl(data.room.allowListenerControl !== false);
         setMembers(data.members || []);
-        setRoomIsPrivate(Boolean(data.room.isPrivate));
+
+        if (data.chats) setChats(data.chats);
+        if (data.queueVotes) setQueueVotes(data.queueVotes);
 
         // Immediately start listening if room has an active song playing!
         if (data.currentSong && data.isPlaying && onPlaySong) {
           onPlaySong(data.currentSong, true);
         }
       } else {
-        setJoinError(data?.error || `Room "${rawCode}" does not exist.`);
+        setJoinError(data?.error || `Room "${rawCode}" not found. Please verify the code.`);
       }
     } catch (err) {
       setJoinError('Network error joining room.');
     }
   };
 
-  // 5. Room Leave Handler
+  // 4. Room Leave Handler
   const handleLeaveRoom = async () => {
     if (!activeRoom) return;
     const code = activeRoom;
@@ -225,10 +293,9 @@ export default function RoomsView({
     setMembers([]);
     setChats([]);
     setQueueVotes({});
-    fetchActiveRooms();
   };
 
-  // 6. Play song inside room & sync
+  // 5. Play song inside room & sync
   const handlePlaySongInRoom = async (song) => {
     if (!song) return;
     if (!canControlMusic) {
@@ -239,6 +306,7 @@ export default function RoomsView({
     onPlaySong(song);
 
     if (activeRoom) {
+      const stableUser = getStableUser(user);
       try {
         await fetch('/api/room', {
           method: 'POST',
@@ -255,20 +323,30 @@ export default function RoomsView({
     }
   };
 
+  // 6. Add searched song to room queue
+  const handleAddToRoomQueue = (song) => {
+    if (!song || !song.id) return;
+    setRoomRecommendations((prev) => {
+      const exists = prev.some((s) => s.id === song.id);
+      if (exists) return prev;
+      return [song, ...prev];
+    });
+    setRoomSearchResults([]);
+  };
+
   // 7. Dynamic recommendations for the room based on currently playing song
   useEffect(() => {
-    if (!currentSong) {
-      setRoomRecommendations([]);
-      return;
-    }
+    if (!currentSong) return;
     let active = true;
 
     fetchLiveRecommendations(currentSong).then((recs) => {
       if (active) {
         const combined = [...(recs.genreTracks || []), ...(recs.artistTracks || [])]
           .filter((s) => (s.duration || 210) <= 600)
-          .slice(0, 6);
-        setRoomRecommendations(combined);
+          .slice(0, 10);
+        if (combined.length > 0) {
+          setRoomRecommendations(combined);
+        }
       }
     });
 
@@ -277,45 +355,65 @@ export default function RoomsView({
     };
   }, [currentSong?.id, currentSong?.artist]);
 
-  // 8. Inside room search
+  // 8. Inside room search (Fast & Responsive)
   const handleRoomSearch = async (e) => {
-    e.preventDefault();
-    if (!roomSearchQuery.trim()) return;
+    if (e && e.preventDefault) e.preventDefault();
+    const q = roomSearchQuery.trim();
+    if (!q) return;
 
     setIsSearching(true);
-    const results = await searchYouTube(roomSearchQuery.trim(), 'music');
-    setRoomSearchResults(results.filter((s) => (s.duration || 210) <= 600).slice(0, 6));
-    setIsSearching(false);
+    try {
+      const results = await searchYouTube(q, 'music');
+      setRoomSearchResults(results.filter((s) => (s.duration || 210) <= 600).slice(0, 8));
+    } catch (err) {
+      console.error('Room search error:', err);
+    } finally {
+      setIsSearching(false);
+    }
   };
 
-  // 9. Chat send
-  const handleSendChat = (e) => {
-    e.preventDefault();
-    if (!chatMsg.trim() || !activeRoom) return;
+  // 9. Chat send (Optimistic UI, persistent across polling)
+  const handleSendChat = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    const msg = chatMsg.trim();
+    if (!msg || !activeRoom) return;
 
-    const currentUser = user || { username: 'Listener' };
+    const stableUser = getStableUser(user);
+    const tempId = 'local_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
     const chatItem = {
-      id: Date.now(),
-      sender: currentUser.username,
-      message: chatMsg.trim(),
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      id: tempId,
+      sender: stableUser.username || 'Listener',
+      message: msg,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      isLocal: true
     };
 
     setChats((prev) => [...prev, chatItem]);
     setChatMsg('');
 
     try {
-      fetch('/api/room', {
+      const res = await fetch('/api/room', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'chat',
           code: activeRoom,
-          user: currentUser,
-          message: chatItem.message
+          user: stableUser,
+          message: msg
         })
       });
-    } catch (err) {}
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.chat) {
+          setChats((prev) =>
+            prev.map((c) => (c.id === tempId ? { ...data.chat, isLocal: false } : c))
+          );
+        }
+      }
+    } catch (err) {
+      console.error('Send chat error:', err);
+    }
   };
 
   const triggerLocalReaction = (emoji, senderName) => {
@@ -328,8 +426,8 @@ export default function RoomsView({
 
   const handleSendReaction = (emoji) => {
     if (!activeRoom) return;
-    const currentUser = user || { username: 'Listener' };
-    triggerLocalReaction(emoji, currentUser.username);
+    const stableUser = getStableUser(user);
+    triggerLocalReaction(emoji, stableUser.username);
   };
 
   const handleUpvote = async (song) => {
@@ -362,7 +460,9 @@ export default function RoomsView({
     }
   };
 
-  const sortedRecommendations = [...roomRecommendations].sort((a, b) => {
+  // Queue is dynamically sorted by votes, with predefined songs always present
+  const activeQueueList = roomRecommendations && roomRecommendations.length > 0 ? roomRecommendations : DEFAULT_ROOM_QUEUE;
+  const sortedRecommendations = [...activeQueueList].sort((a, b) => {
     const votesA = queueVotes[a.id] || 0;
     const votesB = queueVotes[b.id] || 0;
     return votesB - votesA;
@@ -392,8 +492,8 @@ export default function RoomsView({
             <Radio className="w-5 h-5 text-emerald-400" />
           </div>
           <div className="flex flex-col min-w-0">
-            <h2 className="text-base font-black text-white tracking-wide truncate">Synchronous Listening Rooms</h2>
-            <p className="text-xs text-zinc-400 truncate">Stream audio with multiple devices in 100% sync</p>
+            <h2 className="text-base font-black text-white tracking-wide truncate">Private Synchronous Rooms</h2>
+            <p className="text-xs text-zinc-400 truncate">Listen together with friends in 100% sync</p>
           </div>
         </div>
 
@@ -431,43 +531,13 @@ export default function RoomsView({
                 </button>
               </div>
 
-              {/* Public vs Private Selector */}
-              <div className="flex p-0.5 rounded-xl bg-[#080C14] border border-white/10 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => setIsPrivateMode(false)}
-                  className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                    !isPrivateMode
-                      ? 'bg-emerald-500 text-black shadow-sm font-extrabold'
-                      : 'text-zinc-400 hover:text-white'
-                  }`}
-                  title="Visible in discovery list"
-                >
-                  <Globe className="w-3.5 h-3.5" />
-                  <span>Public</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIsPrivateMode(true)}
-                  className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                    isPrivateMode
-                      ? 'bg-purple-500 text-white shadow-sm font-extrabold'
-                      : 'text-zinc-400 hover:text-white'
-                  }`}
-                  title="Unlisted (Join by code only)"
-                >
-                  <Lock className="w-3.5 h-3.5" />
-                  <span>Private</span>
-                </button>
-              </div>
-
               {/* Instant + Create New Room Button */}
               <button
                 onClick={handleCreateNewRoom}
                 className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold text-xs flex items-center gap-1.5 shadow-lg shadow-emerald-500/20 transition-all cursor-pointer active:scale-95 shrink-0"
               >
                 <Plus className="w-4 h-4" />
-                <span>+ CREATE {isPrivateMode ? 'PRIVATE' : 'PUBLIC'} ROOM</span>
+                <span>+ CREATE ROOM</span>
               </button>
 
               {/* Join Existing Room Input */}
@@ -482,7 +552,10 @@ export default function RoomsView({
                   type="text"
                   placeholder="SYNC1962 / Code..."
                   value={inputCode}
-                  onChange={(e) => { setInputCode(e.target.value); setJoinError(''); }}
+                  onChange={(e) => {
+                    setInputCode(e.target.value);
+                    setJoinError('');
+                  }}
                   className="px-3 py-2 rounded-xl bg-[#080C14] border border-white/10 text-xs text-white uppercase outline-none focus:border-emerald-500/50 w-28 sm:w-36"
                 />
                 <button
@@ -536,21 +609,25 @@ export default function RoomsView({
                   </div>
                   <div className="flex flex-col min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <h3 className="text-base font-black text-white truncate">Listening Room {activeRoom}</h3>
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase flex items-center gap-1 ${
-                        roomIsPrivate ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                      }`}>
-                        {roomIsPrivate ? <Lock className="w-3 h-3" /> : <Globe className="w-3 h-3" />}
-                        <span>{roomIsPrivate ? 'Private' : 'Public'}</span>
+                      <h3 className="text-base font-black text-white truncate">Room {activeRoom}</h3>
+                      <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase flex items-center gap-1 bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                        <Lock className="w-3 h-3" />
+                        <span>Private</span>
                       </span>
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase flex items-center gap-1 ${
-                        roomAllowListenerControl ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30' : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                      }`}>
+                      <span
+                        className={`px-2 py-0.5 rounded text-[10px] font-black uppercase flex items-center gap-1 ${
+                          roomAllowListenerControl
+                            ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+                            : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                        }`}
+                      >
                         {roomAllowListenerControl ? <Users className="w-3 h-3" /> : <Crown className="w-3 h-3" />}
                         <span>{roomAllowListenerControl ? 'Everyone Controls' : 'Host Controls Only'}</span>
                       </span>
                     </div>
-                    <p className="text-xs text-zinc-400 truncate">Host: <strong className="text-white">{roomHost || user?.username || 'Host'}</strong></p>
+                    <p className="text-xs text-zinc-400 truncate">
+                      Host: <strong className="text-white">{roomHost || currentUser.username || 'Host'}</strong>
+                    </p>
                   </div>
                 </div>
 
@@ -560,14 +637,7 @@ export default function RoomsView({
                 </div>
               </div>
 
-              {!canControlMusic && (
-                <div className="p-3 px-4 rounded-xl bg-amber-500/10 border border-amber-500/25 flex items-center gap-2.5 text-xs text-amber-300">
-                  <Crown className="w-4 h-4 text-amber-400 shrink-0" />
-                  <span><strong>Host Controls Only:</strong> Playback is managed by {roomHost || 'the host'}. You can listen in real-time, chat, react with emojis, and upvote songs!</span>
-                </div>
-              )}
-
-              {/* Inside-Room Track Search Bar (Full Click-to-Focus Area) */}
+              {/* Inside-Room Track Fast Search Bar */}
               <form onSubmit={handleRoomSearch} className="flex flex-col gap-2">
                 <div
                   onClick={() => roomSearchInputRef.current?.focus()}
@@ -577,22 +647,29 @@ export default function RoomsView({
                   <input
                     ref={roomSearchInputRef}
                     type="text"
-                    placeholder="Search any song to sync across room members (<10m)..."
+                    placeholder="Search any song to sync across room members..."
                     value={roomSearchQuery}
                     onChange={(e) => setRoomSearchQuery(e.target.value)}
                     className="w-full bg-transparent text-xs sm:text-sm text-white outline-none placeholder:text-zinc-500 min-w-0 cursor-text py-0.5"
                   />
-                  <button
-                    type="submit"
-                    className="px-3.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold text-xs transition-colors shrink-0 cursor-pointer shadow-md shadow-emerald-500/20 active:scale-95"
-                  >
-                    {isSearching ? 'Searching...' : 'Search Track'}
-                  </button>
+                  {isSearching ? (
+                    <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/20 text-emerald-300 text-xs font-bold shrink-0">
+                      <span className="w-3 h-3 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" />
+                      <span>Searching...</span>
+                    </div>
+                  ) : (
+                    <button
+                      type="submit"
+                      className="px-3.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold text-xs transition-colors shrink-0 cursor-pointer shadow-md shadow-emerald-500/20 active:scale-95"
+                    >
+                      Search Track
+                    </button>
+                  )}
                 </div>
 
                 {roomSearchResults.length > 0 && (
-                  <div className="p-3 rounded-xl bg-[#080C14] border border-emerald-500/30 flex flex-col gap-2 max-h-60 overflow-y-auto custom-scrollbar">
-                    <div className="flex items-center justify-between text-[11px] font-bold text-emerald-400">
+                  <div className="p-3 rounded-xl bg-[#080C14] border border-emerald-500/30 flex flex-col gap-2 max-h-72 overflow-y-auto custom-scrollbar">
+                    <div className="flex items-center justify-between text-[11px] font-bold text-emerald-400 pb-1 border-b border-white/5">
                       <span>Search Results ({roomSearchResults.length})</span>
                       <button
                         type="button"
@@ -608,36 +685,54 @@ export default function RoomsView({
                         className="p-2 rounded-lg bg-white/5 flex items-center justify-between gap-3 hover:bg-white/10 transition-colors min-w-0"
                       >
                         <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                          <img src={song.thumbnail} alt={song.title} className="w-8 h-8 rounded object-cover shrink-0" />
+                          <img
+                            src={song.thumbnail}
+                            alt={song.title}
+                            className="w-9 h-9 rounded-lg object-cover shrink-0"
+                          />
                           <div className="flex flex-col min-w-0 flex-1">
                             <span className="text-xs font-bold text-white truncate">{song.title}</span>
-                            <span className="text-[10px] text-zinc-400 truncate">{song.artist}</span>
+                            <span className="text-[11px] text-zinc-400 truncate">
+                              {song.artist} • {formatTime(song.duration)}
+                            </span>
                           </div>
                         </div>
-                        <button
-                          type="button"
-                          disabled={!canControlMusic}
-                          onClick={() => {
-                            handlePlaySongInRoom(song);
-                            setRoomSearchResults([]);
-                          }}
-                          className={`px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1 shrink-0 transition-colors ${
-                            canControlMusic
-                              ? 'bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 cursor-pointer'
-                              : 'bg-white/5 text-zinc-500 cursor-not-allowed opacity-60'
-                          }`}
-                          title={canControlMusic ? 'Play in Room' : 'Only host can control music in this room'}
-                        >
-                          <Play className="w-3 h-3 fill-current" />
-                          <span>{canControlMusic ? 'Play in Room' : 'Host Only'}</span>
-                        </button>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => handleAddToRoomQueue(song)}
+                            className="px-2.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-zinc-200 text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                            title="Add to Upcoming Queue"
+                          >
+                            <Plus className="w-3 h-3" />
+                            <span>Queue</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={!canControlMusic}
+                            onClick={() => {
+                              handlePlaySongInRoom(song);
+                              setRoomSearchResults([]);
+                            }}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors ${
+                              canControlMusic
+                                ? 'bg-emerald-500 text-black hover:bg-emerald-400 cursor-pointer shadow-md shadow-emerald-500/20'
+                                : 'bg-white/5 text-zinc-500 cursor-not-allowed opacity-50'
+                            }`}
+                          >
+                            <Play className="w-3 h-3 fill-current" />
+                            <span>{canControlMusic ? 'Play' : 'Host Only'}</span>
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
                 )}
               </form>
 
-              {/* Dynamic Upvote Recommendation System */}
+              {/* Dynamic Upvote Upcoming Queue (Predefined & Interactive) */}
               <div className="flex flex-col gap-3 min-w-0">
                 <div className="flex items-center justify-between">
                   <h4 className="text-xs font-bold text-zinc-300 uppercase tracking-wider flex items-center gap-1.5">
@@ -647,60 +742,65 @@ export default function RoomsView({
                   <span className="text-[10px] text-emerald-400 font-mono">Real-Time Sync Queue</span>
                 </div>
 
-                {sortedRecommendations.length > 0 ? (
-                  <div className="flex flex-col gap-2">
-                    {sortedRecommendations.map((song, idx) => {
-                      const votes = queueVotes[song.id] || 0;
-                      return (
-                        <div
-                          key={song.id}
-                          className={`p-3 px-4 rounded-xl bg-[#080C14] border border-white/5 flex items-center justify-between gap-3 transition-all min-w-0 ${
-                            idx === 0 && votes > 0 ? 'border-emerald-500/50 bg-emerald-500/5' : ''
-                          }`}
-                        >
-                          <div className="flex items-center gap-3 min-w-0 flex-1">
-                            <span className="text-xs font-bold font-mono text-emerald-400 w-5 shrink-0">#{idx + 1}</span>
-                            <img src={song.thumbnail} alt={song.title} className="w-10 h-10 rounded-lg object-cover shrink-0" />
-                            <div className="flex flex-col min-w-0 flex-1">
-                              <span className="text-xs font-bold text-white truncate">{song.title}</span>
-                              <span className="text-[11px] text-zinc-400 truncate">{song.artist} • {formatTime(song.duration)}</span>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-2 shrink-0">
-                            <button
-                              onClick={() => handleUpvote(song)}
-                              className={`px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                                votes > 0
-                                  ? 'bg-emerald-500 text-black font-extrabold shadow-md'
-                                  : 'bg-white/5 hover:bg-white/10 text-zinc-300'
-                              }`}
-                            >
-                              <ThumbsUp className="w-3 h-3" />
-                              <span>{votes}</span>
-                            </button>
-                            <button
-                              disabled={!canControlMusic}
-                              onClick={() => handlePlaySongInRoom(song)}
-                              className={`p-1.5 rounded-lg transition-colors ${
-                                canControlMusic
-                                  ? 'bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 cursor-pointer'
-                                  : 'bg-white/5 text-zinc-500 cursor-not-allowed opacity-60'
-                              }`}
-                              title={canControlMusic ? 'Play in Room' : 'Only host can control music in this room'}
-                            >
-                              <Play className="w-3.5 h-3.5 fill-current ml-0.5" />
-                            </button>
+                <div className="flex flex-col gap-2">
+                  {sortedRecommendations.map((song, idx) => {
+                    const votes = queueVotes[song.id] || 0;
+                    return (
+                      <div
+                        key={song.id}
+                        className={`p-3 px-4 rounded-xl bg-[#080C14] border border-white/5 flex items-center justify-between gap-3 transition-all min-w-0 ${
+                          idx === 0 && votes > 0 ? 'border-emerald-500/50 bg-emerald-500/5' : ''
+                        }`}
+                      >
+                        <div className="flex items-center gap-3 min-w-0 flex-1">
+                          <span className="text-xs font-bold font-mono text-emerald-400 w-5 shrink-0">
+                            #{idx + 1}
+                          </span>
+                          <img
+                            src={song.thumbnail}
+                            alt={song.title}
+                            className="w-10 h-10 rounded-lg object-cover shrink-0"
+                          />
+                          <div className="flex flex-col min-w-0 flex-1">
+                            <span className="text-xs font-bold text-white truncate">{song.title}</span>
+                            <span className="text-[11px] text-zinc-400 truncate">
+                              {song.artist} • {formatTime(song.duration)}
+                            </span>
                           </div>
                         </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="p-6 rounded-xl bg-[#080C14] border border-white/5 text-center text-xs text-zinc-500 italic">
-                    Play a track or search above to load synchronized recommendations for this room.
-                  </div>
-                )}
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => handleUpvote(song)}
+                            className={`px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                              votes > 0
+                                ? 'bg-emerald-500 text-black font-extrabold shadow-md'
+                                : 'bg-white/5 hover:bg-white/10 text-zinc-300'
+                            }`}
+                          >
+                            <ThumbsUp className="w-3 h-3" />
+                            <span>{votes}</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={!canControlMusic}
+                            onClick={() => handlePlaySongInRoom(song)}
+                            className={`p-1.5 rounded-lg transition-colors ${
+                              canControlMusic
+                                ? 'bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 cursor-pointer'
+                                : 'bg-white/5 text-zinc-500 cursor-not-allowed opacity-60'
+                            }`}
+                            title={canControlMusic ? 'Play in Room' : 'Only host can control music in this room'}
+                          >
+                            <Play className="w-3.5 h-3.5 fill-current ml-0.5" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </div>
 
@@ -718,7 +818,10 @@ export default function RoomsView({
 
                 <div className="flex flex-col gap-2 max-h-40 overflow-y-auto custom-scrollbar">
                   {members.map((m) => (
-                    <div key={m.id || m.username} className="flex items-center justify-between p-2 rounded-lg bg-white/5 text-xs">
+                    <div
+                      key={m.id || m.username}
+                      className="flex items-center justify-between p-2 rounded-lg bg-white/5 text-xs"
+                    >
                       <div className="flex items-center gap-2 min-w-0">
                         <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
                         <span className="font-bold text-white truncate">{m.username}</span>
@@ -734,10 +837,13 @@ export default function RoomsView({
 
               {/* Room Live Chat */}
               <div className="p-5 rounded-2xl bg-[#0F1626] border border-white/5 flex flex-col gap-3 h-80 min-w-0">
-                <span className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2">
-                  <MessageSquare className="w-4 h-4 text-emerald-400" />
-                  <span>Room Live Chat</span>
-                </span>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                    <MessageSquare className="w-4 h-4 text-emerald-400" />
+                    <span>Room Live Chat</span>
+                  </span>
+                  <span className="text-[10px] text-zinc-400">{chats.length} messages</span>
+                </div>
 
                 <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-2 pr-1">
                   {chats.length === 0 ? (
@@ -746,15 +852,21 @@ export default function RoomsView({
                     </div>
                   ) : (
                     chats.map((c) => (
-                      <div key={c.id || Math.random()} className="p-2 rounded-lg bg-white/5 flex flex-col gap-0.5 text-xs">
+                      <div
+                        key={c.id || Math.random()}
+                        className="p-2 rounded-lg bg-white/5 flex flex-col gap-0.5 text-xs"
+                      >
                         <div className="flex items-center justify-between text-[10px]">
-                          <span className="font-bold text-emerald-400">{c.sender}</span>
-                          <span className="text-zinc-500 font-mono">{c.timestamp}</span>
+                          <span className="font-bold text-emerald-400">
+                            {c.sender || c.username || 'Listener'}
+                          </span>
+                          <span className="text-zinc-500 font-mono">{c.timestamp || c.time || ''}</span>
                         </div>
                         <span className="text-white break-words">{c.message}</span>
                       </div>
                     ))
                   )}
+                  <div ref={chatBottomRef} />
                 </div>
 
                 <form onSubmit={handleSendChat} className="flex gap-2 pt-2 border-t border-white/5">
@@ -767,7 +879,7 @@ export default function RoomsView({
                   />
                   <button
                     type="submit"
-                    className="px-3 py-1.5 rounded-lg bg-emerald-500 text-black font-extrabold text-xs cursor-pointer shrink-0"
+                    className="px-3.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold text-xs cursor-pointer shrink-0 transition-colors"
                   >
                     Send
                   </button>
@@ -790,72 +902,92 @@ export default function RoomsView({
           </div>
         </div>
       ) : (
-        /* Discovery: Active Public Rooms Directory */
-        <div className="flex flex-col gap-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-bold text-white flex items-center gap-2">
-              <Radio className="w-4 h-4 text-emerald-400" />
-              <span>Public Listening Rooms ({rooms.length})</span>
-            </h3>
-            <span className="text-xs text-zinc-500">Live synchronized streams</span>
+        /* Clean Private Room Lobby */
+        <div className="p-8 sm:p-12 rounded-2xl bg-[#0F1626] border border-white/5 flex flex-col items-center justify-center text-center gap-6 max-w-2xl mx-auto w-full">
+          <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shadow-xl shadow-emerald-500/10">
+            <Lock className="w-8 h-8" />
           </div>
 
-          {rooms.length > 0 ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {rooms.map((room) => (
-                <div
-                  key={room.code}
-                  className="p-5 rounded-2xl bg-[#0F1626] border border-white/5 hover:border-emerald-500/40 transition-all flex flex-col justify-between gap-4 group"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 font-mono font-black text-xs">
-                      {room.code}
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded border font-bold ${
-                        room.allowListenerControl
-                          ? 'text-blue-300 bg-blue-500/10 border-blue-500/20'
-                          : 'text-amber-300 bg-amber-500/10 border-amber-500/20'
-                      }`}>
-                        {room.allowListenerControl ? 'Collaborative' : 'Host Only'}
-                      </span>
-                      <span className="text-[11px] text-zinc-400 flex items-center gap-1 font-semibold">
-                        <Users className="w-3.5 h-3.5 text-zinc-500" />
-                        <span>{room.member_count || 1}</span>
-                      </span>
-                    </div>
-                  </div>
+          <div className="flex flex-col gap-2">
+            <h3 className="text-xl font-black text-white tracking-wide">Join or Create a Private Listening Room</h3>
+            <p className="text-xs sm:text-sm text-zinc-400 max-w-md mx-auto">
+              Rooms in SyncTune are completely private. Share your simple 4-digit code (e.g.{' '}
+              <span className="font-mono text-emerald-400 font-bold">SYNC1962</span>) with friends to listen together in perfect sync.
+            </p>
+          </div>
 
-                  <div className="flex flex-col gap-1 min-w-0">
-                    <h4 className="text-xs font-bold text-white truncate group-hover:text-emerald-400 transition-colors">
-                      {room.song_title || 'No song playing'}
-                    </h4>
-                    <p className="text-[11px] text-zinc-400 truncate">
-                      {room.song_artist || 'SyncTune'} • Host: <strong className="text-zinc-300">{room.host_name}</strong>
-                    </p>
-                  </div>
+          <div className="flex flex-col sm:flex-row items-center gap-3 w-full max-w-md">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (inputCode.trim()) handleJoinRoom(inputCode.trim());
+              }}
+              className="flex items-center gap-2 w-full"
+            >
+              <input
+                type="text"
+                placeholder="Enter Code (e.g. SYNC1962)..."
+                value={inputCode}
+                onChange={(e) => {
+                  setInputCode(e.target.value);
+                  setJoinError('');
+                }}
+                className="flex-1 px-4 py-3 rounded-xl bg-[#080C14] border border-white/15 text-sm text-white uppercase outline-none focus:border-emerald-400 transition-colors"
+              />
+              <button
+                type="submit"
+                className="px-5 py-3 rounded-xl bg-[#141C30] hover:bg-emerald-500 text-white hover:text-black font-extrabold text-xs transition-all cursor-pointer shrink-0"
+              >
+                Join
+              </button>
+            </form>
+          </div>
 
-                  <button
-                    onClick={() => handleJoinRoom(room.code)}
-                    className="w-full py-2 rounded-xl bg-[#141C30] hover:bg-emerald-500 text-zinc-300 hover:text-black font-extrabold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer"
-                  >
-                    <span>Join Room</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              ))}
+          <div className="flex items-center gap-4 w-full max-w-md">
+            <div className="h-[1px] bg-white/10 flex-1" />
+            <span className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider">or create new</span>
+            <div className="h-[1px] bg-white/10 flex-1" />
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 w-full max-w-md">
+            {/* Listener Control Permission Selector */}
+            <div className="flex p-0.5 rounded-xl bg-[#080C14] border border-white/10 w-full sm:w-auto justify-center">
+              <button
+                type="button"
+                onClick={() => setAllowListenerControl(false)}
+                className={`flex-1 sm:flex-none px-3 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                  !allowListenerControl
+                    ? 'bg-amber-500 text-black shadow-sm font-extrabold'
+                    : 'text-zinc-400 hover:text-white'
+                }`}
+                title="Only Host can control playback"
+              >
+                <Crown className="w-3.5 h-3.5" />
+                <span>Host Only</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setAllowListenerControl(true)}
+                className={`flex-1 sm:flex-none px-3 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                  allowListenerControl
+                    ? 'bg-emerald-500 text-black shadow-sm font-extrabold'
+                    : 'text-zinc-400 hover:text-white'
+                }`}
+                title="Everyone can control playback"
+              >
+                <Users className="w-3.5 h-3.5" />
+                <span>Everyone</span>
+              </button>
             </div>
-          ) : (
-            <div className="p-10 rounded-2xl bg-[#0F1626] border border-white/5 text-center flex flex-col items-center justify-center gap-3">
-              <Radio className="w-8 h-8 text-emerald-400 animate-pulse" />
-              <div className="flex flex-col gap-1">
-                <span className="font-bold text-white text-sm">No active public rooms right now</span>
-                <span className="text-zinc-500 text-xs">
-                  Click "+ CREATE ROOM" above to start a session and invite your friends!
-                </span>
-              </div>
-            </div>
-          )}
+
+            <button
+              onClick={handleCreateNewRoom}
+              className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 transition-all cursor-pointer active:scale-95"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Create Private Room</span>
+            </button>
+          </div>
         </div>
       )}
     </div>

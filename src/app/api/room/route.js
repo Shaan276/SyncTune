@@ -95,7 +95,7 @@ export async function POST(request) {
     // CREATE ROOM
     if (action === 'create') {
       let code = normalizeRoomCode(body.code);
-      if (!code || roomsStore[code]) {
+      if (!code) {
         code = generateUniqueCode();
         while (roomsStore[code]) {
           code = generateUniqueCode();
@@ -108,7 +108,7 @@ export async function POST(request) {
         code,
         host_name: user.username || 'Host',
         host_id: user.id,
-        isPrivate,
+        isPrivate: true,
         allowListenerControl,
         controlMode: allowListenerControl ? 'collaborative' : 'host_only',
         members: [
@@ -118,8 +118,8 @@ export async function POST(request) {
         isPlaying: false,
         currentTime: 0,
         lastUpdated: Date.now(),
-        chats: [],
-        queueVotes: {}
+        chats: roomsStore[code]?.chats || [],
+        queueVotes: roomsStore[code]?.queueVotes || {}
       };
 
       return NextResponse.json({
@@ -223,15 +223,16 @@ export async function POST(request) {
     // CHAT MESSAGE IN ROOM
     if (action === 'chat') {
       if (body.message) {
+        if (!room.chats) room.chats = [];
         const chatItem = {
-          id: Date.now(),
-          sender: user.username || 'Listener',
+          id: String(Date.now()) + '_' + Math.random().toString(36).substring(2, 6),
+          sender: user.username || body.username || 'Listener',
           message: body.message,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         };
         room.chats.push(chatItem);
         if (room.chats.length > 50) room.chats.shift();
-        return NextResponse.json({ success: true, chat: chatItem });
+        return NextResponse.json({ success: true, chat: chatItem, chats: room.chats });
       }
     }
 
