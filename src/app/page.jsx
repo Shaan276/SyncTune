@@ -164,11 +164,11 @@ export default function Home() {
   }, [user?.id]);
 
   const handleRefreshQueue = useCallback(async (overrideMode) => {
-    const baseSong = currentSongRef.current;
+    const baseSong = currentSongRef.current || queueRef.current[0] || (history.length > 0 ? history[0] : null);
     if (!baseSong) return;
     const mode = overrideMode || autoplayModeRef.current;
     try {
-      const recs = await fetchLiveRecommendations(baseSong);
+      const recs = await fetchLiveRecommendations(baseSong, true);
       const candidates = mode === 'artist'
         ? (recs.artistTracks || [])
         : (recs.genreTracks || []);
@@ -177,20 +177,22 @@ export default function Home() {
         .filter((t) => t.id !== baseSong.id && (t.duration || 210) <= 600)
         .slice(0, 10);
 
-      setQueue(newTracks);
-      try {
-        localStorage.setItem('synctune_queue', JSON.stringify(newTracks));
-      } catch (e) {}
+      if (newTracks.length > 0) {
+        setQueue(newTracks);
+        try {
+          localStorage.setItem('synctune_queue', JSON.stringify(newTracks));
+        } catch (e) {}
+      }
     } catch (err) {}
-  }, []);
+  }, [history]);
 
-  const handleSetAutoplayMode = (mode) => {
+  const handleSetAutoplayMode = useCallback(async (mode) => {
     setAutoplayMode(mode);
     try {
       localStorage.setItem('synctune_autoplay_mode', mode);
     } catch (e) {}
-    handleRefreshQueue(mode);
-  };
+    return await handleRefreshQueue(mode);
+  }, [handleRefreshQueue]);
 
   // Helper: Replenish queue to maintain exactly 10 upcoming tracks
   const replenishQueueToTarget = useCallback(async (baseSong, currentList, targetCount = 10) => {

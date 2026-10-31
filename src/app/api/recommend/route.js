@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { Ytdl } from '@distube/ytdl-core';
 
 export const dynamic = 'force-dynamic';
 
@@ -6,6 +7,11 @@ if (!global._synctune_recommend_cache) {
   global._synctune_recommend_cache = new Map();
 }
 const recommendCache = global._synctune_recommend_cache;
+
+if (!global._synctune_ytdl_recommend_instance) {
+  global._synctune_ytdl_recommend_instance = new Ytdl();
+}
+const yt = global._synctune_ytdl_recommend_instance;
 
 const RECORD_LABELS = [
   't-series', 'tseries', 'zee music', 'sony music', 'speed records', 'yrf', 'tips official',
@@ -187,44 +193,51 @@ export async function GET(request) {
   const rawArtist = searchParams.get('artist') || '';
   const title = searchParams.get('title') || '';
   const videoId = searchParams.get('videoId') || '';
+  const forceRefresh = searchParams.get('refresh') === 'true' || searchParams.get('t');
 
-  if (!rawArtist && !title) {
+  if (!rawArtist && !title && !videoId) {
     return NextResponse.json({ artistTracks: [], genreTracks: [] });
   }
 
   const cacheKey = `${videoId}_${rawArtist}_${title}`;
-  const cached = recommendCache.get(cacheKey);
-  if (cached && Date.now() - cached.timestamp < 15 * 60 * 1000) {
-    return NextResponse.json(cached.data);
+  if (!forceRefresh) {
+    const cached = recommendCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < 15 * 60 * 1000) {
+      return NextResponse.json(cached.data);
+    }
   }
 
   // 1. Extract real artists
   const artists = extractArtists(title, rawArtist);
+  const primaryArtist = artists[0] || rawArtist || '';
+  const normPrimary = primaryArtist.toLowerCase().replace(/\s+/g, '');
 
-  // 2. Fetch Strictly Same Artist Tracks
+  // 2. Fetch True YouTube Related Tracks via Innertube API
+  let relatedTracks = [];
+  if (videoId) {
+    try {
+      const rawRelated = await yt.getRelated(videoId);
+      relatedTracks = (rawRelated || [])
+        .filter(v => !v.isLive && !v.isUpcoming && (v.lengthSeconds || 210) > 30 && (v.lengthSeconds || 210) <= 600)
+        .map(v => ({
+          id: v.id,
+          title: v.title || 'YouTube Song',
+          artist: cleanArtistName(v.author?.name || 'Artist'),
+          duration: v.lengthSeconds || 210,
+          thumbnail: `https://img.youtube.com/vi/${v.id}/mqdefault.jpg`
+        }));
+    } catch (e) {}
+  }
+
+  // 3. Fetch Strictly Same Artist Tracks
   let artistTracks = [];
   const artistSeen = new Set();
   if (videoId) artistSeen.add(videoId);
 
-  for (const art of artists.slice(0, 3)) {
-    const artSongs = await fetchFromYouTube(`${art} songs official audio`, videoId);
-    for (const song of artSongs) {
-      if (!artistSeen.has(song.id)) {
-        // Verify artist is strictly present in title or channel
-        const checkStr = `${song.title} ${song.artist}`.toLowerCase();
-        if (checkStr.includes(art.toLowerCase())) {
-          artistSeen.add(song.id);
-          artistTracks.push(song);
-        }
-      }
-    }
-  }
-
-  // If still need more artist tracks and we have at least one artist, do broader search
-  if (artistTracks.length < 5 && artists.length > 0) {
-    const primaryArtist = artists[0];
-    const moreSongs = await fetchFromYouTube(`${primaryArtist} top hits songs`, videoId);
-    for (const song of moreSongs) {
+  // Check relatedTracks for songs by the same artist
+  for (const song of relatedTracks) {
+    const checkStr = `${song.title} ${song.artist}`.toLowerCase().replace(/\s+/g, '');
+    if (normPrimary && checkStr.includes(normPrimary)) {
       if (!artistSeen.has(song.id)) {
         artistSeen.add(song.id);
         artistTracks.push(song);
@@ -232,22 +245,76 @@ export async function GET(request) {
     }
   }
 
-  // 3. Fetch Same Taste & Genre Tracks (Vibe match, excluding primary artist)
-  const cleanTitle = title.split(/[|\-–—]/)[0]?.replace(/\([^)]*\)/g, '').trim() || title;
-  const genreQuery = artists.length > 0
-    ? `${artists[0]} radio mix similar songs`
-    : `${cleanTitle} similar vibe songs`;
+  // Search for official artist tracks
+  if (artistTracks.length < 10 && primaryArtist) {
+    const artSongs = await fetchFromYouTube(`${primaryArtist} songs official audio`, videoId);
+    for (const song of artSongs) {
+      if (!artistSeen.has(song.id)) {
+        const checkStr = `${song.title} ${song.artist}`.toLowerCase().replace(/\s+/g, '');
+        if (checkStr.includes(normPrimary) || !normPrimary) {
+          artistSeen.add(song.id);
+          artistTracks.push(song);
+        }
+      }
+    }
+  }
 
-  const genreRaw = await fetchFromYouTube(genreQuery, videoId);
-  const genreTracks = [];
+  // If still need more, search top tracks
+  if (artistTracks.length < 10 && primaryArtist) {
+    const topHits = await fetchFromYouTube(`${primaryArtist} top hits songs`, videoId);
+    for (const song of topHits) {
+      if (!artistSeen.has(song.id)) {
+        artistSeen.add(song.id);
+        artistTracks.push(song);
+      }
+    }
+  }
+
+  // 4. Fetch Same Taste & Genre Tracks (Vibe match)
+  const cleanTitle = title.split(/[|\-–—]/)[0]?.replace(/\([^)]*\)/g, '').trim() || title;
+  let genreTracks = [];
   const genreSeen = new Set();
   if (videoId) genreSeen.add(videoId);
 
-  for (const song of genreRaw) {
+  // First, add all relatedTracks that are NOT the primary artist (true same vibe / genre!)
+  for (const song of relatedTracks) {
+    const checkStr = `${song.title} ${song.artist}`.toLowerCase().replace(/\s+/g, '');
+    const isSameArtist = normPrimary && checkStr.includes(normPrimary);
+    if (!isSameArtist && !genreSeen.has(song.id)) {
+      genreSeen.add(song.id);
+      genreTracks.push(song);
+    }
+  }
+
+  // If we need more genre tracks, search for similar songs
+  if (genreTracks.length < 10) {
+    const vibeQuery = primaryArtist
+      ? `${cleanTitle} ${primaryArtist} similar vibe songs audio`
+      : `${cleanTitle} similar songs audio`;
+
+    const vibeSongs = await fetchFromYouTube(vibeQuery, videoId);
+    for (const song of vibeSongs) {
+      if (!genreSeen.has(song.id) && !artistSeen.has(song.id)) {
+        genreSeen.add(song.id);
+        genreTracks.push(song);
+      }
+    }
+  }
+
+  // Fallback: If genreTracks has remaining relatedTracks, include them
+  for (const song of relatedTracks) {
     if (!genreSeen.has(song.id)) {
       genreSeen.add(song.id);
       genreTracks.push(song);
     }
+  }
+
+  // Safeguard: Ensure neither pool is empty
+  if (genreTracks.length === 0 && artistTracks.length > 0) {
+    genreTracks = [...artistTracks];
+  }
+  if (artistTracks.length === 0 && genreTracks.length > 0) {
+    artistTracks = [...genreTracks];
   }
 
   const payload = {

@@ -120,7 +120,7 @@ export function getUserRecommendations(history = []) {
   }
 }
 
-export async function fetchLiveRecommendations(song) {
+export async function fetchLiveRecommendations(song, isRefresh = false) {
   if (!song) return { artistTracks: [], genreTracks: [] };
   try {
     const params = new URLSearchParams({
@@ -128,6 +128,10 @@ export async function fetchLiveRecommendations(song) {
       title: song.title || '',
       videoId: song.id || ''
     });
+    if (isRefresh || song.refresh) {
+      params.set('refresh', 'true');
+      params.set('t', Date.now().toString());
+    }
     const res = await fetch(`/api/recommend?${params.toString()}`);
     if (res.ok) {
       const data = await res.json();

@@ -20,19 +20,28 @@ export default function QueueDrawer({
 
   if (!isOpen) return null;
 
-  const handleRefresh = async (overrideMode) => {
+  const handleRefresh = async () => {
     if (!onRefreshQueue) return;
     setIsRefreshing(true);
     try {
-      await onRefreshQueue(overrideMode || autoplayMode);
+      await onRefreshQueue(autoplayMode);
     } finally {
-      setTimeout(() => setIsRefreshing(false), 500);
+      setTimeout(() => setIsRefreshing(false), 300);
     }
   };
 
-  const handleModeChange = (mode) => {
-    if (setAutoplayMode) setAutoplayMode(mode);
-    handleRefresh(mode);
+  const handleModeChange = async (mode) => {
+    if (mode === autoplayMode) return;
+    setIsRefreshing(true);
+    try {
+      if (setAutoplayMode) {
+        await setAutoplayMode(mode);
+      } else if (onRefreshQueue) {
+        await onRefreshQueue(mode);
+      }
+    } finally {
+      setTimeout(() => setIsRefreshing(false), 300);
+    }
   };
 
   return (
@@ -163,7 +172,19 @@ export default function QueueDrawer({
               <span className="text-[10px] text-zinc-500 font-mono">Auto-refilling buffer</span>
             </div>
 
-            {queue.length === 0 ? (
+            {isRefreshing ? (
+              <div className="flex flex-col gap-2">
+                {[1, 2, 3, 4, 5, 6].map((i) => (
+                  <div key={i} className="p-2.5 rounded-xl bg-[#0F1626]/80 border border-white/5 flex items-center gap-3 animate-pulse">
+                    <div className="w-10 h-10 rounded-lg bg-white/10 shrink-0" />
+                    <div className="flex-1 flex flex-col gap-2">
+                      <div className="h-3 w-3/4 bg-white/10 rounded" />
+                      <div className="h-2.5 w-1/2 bg-white/5 rounded" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : queue.length === 0 ? (
               <div className="p-8 text-center rounded-2xl bg-[#080C14] border border-white/5 flex flex-col items-center justify-center gap-2">
                 <p className="text-xs text-zinc-400 font-semibold">Queue is empty</p>
                 <p className="text-[11px] text-zinc-600 max-w-xs">
