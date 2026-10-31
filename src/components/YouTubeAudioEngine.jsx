@@ -32,6 +32,11 @@ export default function YouTubeAudioEngine({
   const useIframeFallbackRef = useRef(false);
   useIframeFallbackRef.current = useIframeFallback;
 
+  // Ultra-fast failover watchdog refs
+  const playWatchdogRef = useRef(null);
+  const nativeAudioStartedRef = useRef(false);
+  const lastIframeSongIdRef = useRef(null);
+
   const onEndedRef = useRef(onEnded);
   const onTimeUpdateRef = useRef(onTimeUpdate);
   const onPlayRef = useRef(onPlay);
@@ -66,6 +71,47 @@ export default function YouTubeAudioEngine({
   useEffect(() => {
     onSeekRef.current = onSeek;
   }, [onSeek]);
+
+  // Fast switch to pre-warmed YouTube Iframe Engine (sub-second playback)
+  const switchToIframe = (songId) => {
+    if (!songId) return;
+    if (useIframeFallbackRef.current && lastIframeSongIdRef.current === songId) {
+      return;
+    }
+    console.log('[SyncTune Audio] Activating pre-warmed YouTube Engine for:', songId);
+    lastIframeSongIdRef.current = songId;
+    useIframeFallbackRef.current = true;
+    setUseIframeFallback(true);
+
+    // Stop native audio to avoid duplicate playback
+    if (audioRef.current) {
+      try {
+        audioRef.current.pause();
+        audioRef.current.removeAttribute('src');
+        audioRef.current.load();
+      } catch (e) {}
+    }
+
+    // Keep silent carrier alive to preserve mobile background audio session
+    if (silentAudioRef.current && isPlayingRef.current) {
+      silentAudioRef.current.play().catch(() => {});
+    }
+
+    if (playerRef.current && isReadyRef.current) {
+      try {
+        playerRef.current.unMute();
+        playerRef.current.setVolume(Math.floor(volume * 100));
+        if (isPlayingRef.current) {
+          playerRef.current.loadVideoById(songId, 0);
+          playerRef.current.playVideo();
+        } else {
+          playerRef.current.cueVideoById(songId, 0);
+        }
+      } catch (e) {
+        console.warn('[SyncTune Iframe Engine] loadVideoById error:', e);
+      }
+    }
+  };
 
   // 1. Synchronously Unlock Audio Pipeline on User Interaction (iOS Safari, iOS Chrome & Android Chrome)
   useEffect(() => {
@@ -147,9 +193,19 @@ export default function YouTubeAudioEngine({
   const updatePositionState = (explicitPos) => {
     if (typeof window === 'undefined' || !('mediaSession' in navigator) || !('setPositionState' in navigator.mediaSession)) return;
     if (!isPlayingRef.current) return; // W3C Spec: setPositionState must NEVER be called with playbackRate <= 0
-    const d = audioRef.current?.duration || duration;
+    let d = audioRef.current?.duration || duration;
+    if ((!d || isNaN(d) || d <= 0) && playerRef.current && typeof playerRef.current.getDuration === 'function') {
+      try {
+        d = playerRef.current.getDuration();
+      } catch (e) {}
+    }
     if (!d || isNaN(d) || d <= 0) return;
-    const pos = explicitPos !== undefined ? explicitPos : (audioRef.current?.currentTime || currentTime);
+    let pos = explicitPos !== undefined ? explicitPos : (audioRef.current?.currentTime || currentTime);
+    if ((pos === undefined || isNaN(pos)) && playerRef.current && typeof playerRef.current.getCurrentTime === 'function') {
+      try {
+        pos = playerRef.current.getCurrentTime();
+      } catch (e) {}
+    }
     if (isNaN(pos) || pos < 0 || pos > d) return;
 
     try {
@@ -187,6 +243,9 @@ export default function YouTubeAudioEngine({
         if (audioRef.current && !useIframeFallbackRef.current) {
           audioRef.current.play().catch(() => {});
         }
+        if (silentAudioRef.current) {
+          silentAudioRef.current.play().catch(() => {});
+        }
         if (useIframeFallbackRef.current && playerRef.current && isReadyRef.current) {
           try {
             playerRef.current.unMute();
@@ -208,6 +267,9 @@ export default function YouTubeAudioEngine({
       navigator.mediaSession.setActionHandler('pause', () => {
         if (audioRef.current) {
           audioRef.current.pause();
+        }
+        if (silentAudioRef.current) {
+          silentAudioRef.current.pause();
         }
         if (playerRef.current && isReadyRef.current) {
           try {
@@ -234,7 +296,7 @@ export default function YouTubeAudioEngine({
       });
       navigator.mediaSession.setActionHandler('seekto', (details) => {
         if (details.seekTime !== undefined) {
-          if (audioRef.current) {
+          if (audioRef.current && !useIframeFallbackRef.current) {
             audioRef.current.currentTime = details.seekTime;
           }
           if (onSeekRef.current) onSeekRef.current(details.seekTime);
@@ -270,9 +332,9 @@ export default function YouTubeAudioEngine({
     } catch (e) {}
   }, [isPlaying, duration]);
 
-  // 4. Initialize YouTube IFrame API ONLY IF fallback is required
+  // 4. Pre-warm YouTube IFrame API ON MOUNT (Zero-latency fallback ready in background)
   useEffect(() => {
-    if (!useIframeFallback) return;
+    if (typeof window === 'undefined') return;
 
     if (!window.YT) {
       const tag = document.createElement('script');
@@ -285,13 +347,15 @@ export default function YouTubeAudioEngine({
 
     const initPlayer = () => {
       if (playerRef.current || !window.YT || !window.YT.Player) return;
+      const container = document.getElementById('synctune-ultra-low-audio-engine');
+      if (!container) return;
 
       playerRef.current = new window.YT.Player('synctune-ultra-low-audio-engine', {
         height: '240',
         width: '320',
         videoId: currentSong?.id || '',
         playerVars: {
-          autoplay: 1,
+          autoplay: 0,
           controls: 0,
           disablekb: 1,
           fs: 0,
@@ -300,7 +364,7 @@ export default function YouTubeAudioEngine({
           modestbranding: 1,
           playsinline: 1,
           suggestedQuality: 'small',
-          origin: typeof window !== 'undefined' ? window.location.origin : ''
+          origin: window.location.origin
         },
         events: {
           onReady: (event) => {
@@ -317,14 +381,24 @@ export default function YouTubeAudioEngine({
               event.target.setPlaybackQuality('small');
               event.target.setVolume(Math.floor(volume * 100));
               event.target.unMute();
-              if (isPlayingRef.current && currentSong?.id) {
+              if (useIframeFallbackRef.current && isPlayingRef.current && currentSong?.id) {
+                event.target.loadVideoById(currentSong.id, 0);
                 event.target.playVideo();
               }
             } catch (e) {}
           },
           onStateChange: (event) => {
-            if (event.data === window.YT.PlayerState.ENDED) {
-              if (onEndedRef.current) {
+            if (event.data === window.YT.PlayerState.PLAYING) {
+              if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
+                navigator.mediaSession.playbackState = 'playing';
+                updatePositionState();
+              }
+            } else if (event.data === window.YT.PlayerState.PAUSED) {
+              if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
+                navigator.mediaSession.playbackState = 'paused';
+              }
+            } else if (event.data === window.YT.PlayerState.ENDED) {
+              if (useIframeFallbackRef.current && onEndedRef.current) {
                 onEndedRef.current();
               }
             }
@@ -338,12 +412,19 @@ export default function YouTubeAudioEngine({
     } else {
       window.onYouTubeIframeAPIReady = initPlayer;
     }
-  }, [useIframeFallback]);
+  }, []);
 
   // Global helper methods
   useEffect(() => {
     window.syncTunePlayAudio = (songId, directAudioUrl = null, title = '', artist = '') => {
+      if (playWatchdogRef.current) {
+        clearTimeout(playWatchdogRef.current);
+        playWatchdogRef.current = null;
+      }
+      nativeAudioStartedRef.current = false;
       setUseIframeFallback(false);
+      useIframeFallbackRef.current = false;
+
       if (audioRef.current) {
         if (songId && songId !== lastSongIdRef.current) {
           lastSongIdRef.current = songId;
@@ -355,6 +436,14 @@ export default function YouTubeAudioEngine({
         }
         audioRef.current.volume = volume;
         audioRef.current.play().catch(() => {});
+
+        // 800ms fast failover watchdog
+        playWatchdogRef.current = setTimeout(() => {
+          if (!nativeAudioStartedRef.current && isPlayingRef.current && !useIframeFallbackRef.current) {
+            console.log('[SyncTune Watchdog] Native stream not active in 800ms, triggering fast switch');
+            switchToIframe(songId);
+          }
+        }, 800);
       }
     };
 
@@ -406,6 +495,9 @@ export default function YouTubeAudioEngine({
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('pagehide', handleVisibilityChange);
+      if (playWatchdogRef.current) {
+        clearTimeout(playWatchdogRef.current);
+      }
       if (playerRef.current && typeof playerRef.current.destroy === 'function') {
         playerRef.current.destroy();
         playerRef.current = null;
@@ -424,7 +516,21 @@ export default function YouTubeAudioEngine({
     if (isNewSong || isExplicitNewPlay) {
       lastSongIdRef.current = currentSong.id;
       lastPlayTriggerRef.current = currentSong.playTrigger || Date.now();
+      
+      if (playWatchdogRef.current) {
+        clearTimeout(playWatchdogRef.current);
+        playWatchdogRef.current = null;
+      }
+      nativeAudioStartedRef.current = false;
       setUseIframeFallback(false);
+      useIframeFallbackRef.current = false;
+
+      // Stop previous video on iframe if running
+      if (playerRef.current && isReadyRef.current) {
+        try {
+          playerRef.current.pauseVideo();
+        } catch (e) {}
+      }
 
       if (audioRef.current) {
         const targetSrc = (currentSong.audioUrl && typeof currentSong.audioUrl === 'string' && currentSong.audioUrl.startsWith('http'))
@@ -436,6 +542,14 @@ export default function YouTubeAudioEngine({
           audioRef.current.play().catch((err) => {
             console.warn('[SyncTune Audio] Direct play deferred:', err);
           });
+
+          // 800ms fast failover watchdog
+          playWatchdogRef.current = setTimeout(() => {
+            if (!nativeAudioStartedRef.current && isPlayingRef.current && !useIframeFallbackRef.current) {
+              console.log('[SyncTune Watchdog] Native stream not active in 800ms, triggering fast switch');
+              switchToIframe(currentSong.id);
+            }
+          }, 800);
         }
       }
     }
@@ -464,6 +578,9 @@ export default function YouTubeAudioEngine({
             const time = playerRef.current.getCurrentTime();
             if (onTimeUpdateRef.current && !isNaN(time)) {
               onTimeUpdateRef.current(time);
+              if (isPlayingRef.current) {
+                updatePositionState(time);
+              }
             }
           } catch (e) {}
         }
@@ -484,10 +601,28 @@ export default function YouTubeAudioEngine({
         ref={audioRef}
         playsInline
         preload="auto"
+        onPlaying={() => {
+          nativeAudioStartedRef.current = true;
+          if (playWatchdogRef.current) {
+            clearTimeout(playWatchdogRef.current);
+            playWatchdogRef.current = null;
+          }
+          if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
+            navigator.mediaSession.playbackState = 'playing';
+            updatePositionState();
+          }
+        }}
         onTimeUpdate={(e) => {
           if (!useIframeFallback && onTimeUpdateRef.current) {
             const t = e.currentTarget.currentTime;
             if (!isNaN(t)) {
+              if (!nativeAudioStartedRef.current && t > 0) {
+                nativeAudioStartedRef.current = true;
+                if (playWatchdogRef.current) {
+                  clearTimeout(playWatchdogRef.current);
+                  playWatchdogRef.current = null;
+                }
+              }
               onTimeUpdateRef.current(t);
               if (isPlayingRef.current) {
                 updatePositionState(t);
@@ -512,10 +647,14 @@ export default function YouTubeAudioEngine({
           }
         }}
         onError={(e) => {
+          if (playWatchdogRef.current) {
+            clearTimeout(playWatchdogRef.current);
+            playWatchdogRef.current = null;
+          }
           const src = audioRef.current?.getAttribute('src');
           if (!src || !currentSong?.id) return;
           console.warn('[SyncTune Native Audio] Stream error event, switching to fallback:', e);
-          setUseIframeFallback(true);
+          switchToIframe(currentSong.id);
         }}
         style={{
           position: 'fixed',
@@ -539,24 +678,23 @@ export default function YouTubeAudioEngine({
         style={{ display: 'none' }}
       />
 
-      {/* Backup YouTube Iframe Engine container (only rendered if fallback is actively triggered) */}
-      {useIframeFallback && (
-        <div
-          style={{
-            position: 'fixed',
-            bottom: 0,
-            right: 0,
-            width: '320px',
-            height: '240px',
-            transform: 'scale(0.001)',
-            transformOrigin: 'bottom right',
-            pointerEvents: 'none',
-            zIndex: 1
-          }}
-        >
-          <div id="synctune-ultra-low-audio-engine" />
-        </div>
-      )}
+      {/* Pre-warmed YouTube Iframe Engine container (always in DOM so warm player is ready in 0ms) */}
+      <div
+        style={{
+          position: 'fixed',
+          bottom: 0,
+          right: 0,
+          width: '320px',
+          height: '240px',
+          transform: 'scale(0.001)',
+          transformOrigin: 'bottom right',
+          pointerEvents: 'none',
+          zIndex: 1,
+          opacity: useIframeFallback ? 0.01 : 0
+        }}
+      >
+        <div id="synctune-ultra-low-audio-engine" />
+      </div>
     </>
   );
 }

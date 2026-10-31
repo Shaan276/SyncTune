@@ -95,7 +95,7 @@ async function searchExactSaavn(rawTitle, rawArtist) {
   try {
     const url = `https://www.jiosaavn.com/api.php?__call=search.getResults&q=${encodeURIComponent(query)}&_format=json&_marker=0&ctx=web6dot0&api_version=4`;
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 3500);
+    const timeout = setTimeout(() => controller.abort(), 1200);
     const res = await fetch(url, {
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
       signal: controller.signal
@@ -154,7 +154,11 @@ async function getAudioUrl(videoId) {
   }
 
   try {
-    const info = await yt.getInfo(videoId);
+    const fetchInfoPromise = yt.getInfo(videoId);
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('YTDL stream fetch timed out after 1200ms')), 1200)
+    );
+    const info = await Promise.race([fetchInfoPromise, timeoutPromise]);
     const audioFormats = info.formats?.filter(f => f.hasAudio && !f.hasVideo) || [];
 
     // Prefer itag 140 (audio/mp4 m4a 128kbps AAC - universal Apple iOS & Android background playback)
