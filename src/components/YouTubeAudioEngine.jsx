@@ -333,7 +333,7 @@ export default function YouTubeAudioEngine({
           lastPlayTriggerRef.current = Date.now();
           const targetSrc = (directAudioUrl && typeof directAudioUrl === 'string' && directAudioUrl.startsWith('http'))
             ? directAudioUrl
-            : `/api/stream?id=${encodeURIComponent(songId)}`;
+            : `/api/stream?id=${encodeURIComponent(songId)}&title=${encodeURIComponent(title || currentSong?.title || '')}&artist=${encodeURIComponent(artist || currentSong?.artist || '')}`;
           audioRef.current.src = targetSrc;
         }
         audioRef.current.volume = volume;
@@ -409,7 +409,7 @@ export default function YouTubeAudioEngine({
       if (audioRef.current) {
         const targetSrc = (currentSong.audioUrl && typeof currentSong.audioUrl === 'string' && currentSong.audioUrl.startsWith('http'))
           ? currentSong.audioUrl
-          : `/api/stream?id=${encodeURIComponent(currentSong.id)}`;
+          : `/api/stream?id=${encodeURIComponent(currentSong.id)}&title=${encodeURIComponent(currentSong.title || '')}&artist=${encodeURIComponent(currentSong.artist || '')}`;
         audioRef.current.src = targetSrc;
         audioRef.current.volume = volume;
         if (isPlaying) {
@@ -494,7 +494,8 @@ export default function YouTubeAudioEngine({
         onError={(e) => {
           const src = audioRef.current?.getAttribute('src');
           if (!src || !currentSong?.id) return;
-          console.warn('[SyncTune Native Audio] Stream error event:', e);
+          console.warn('[SyncTune Native Audio] Stream error event, switching to fallback:', e);
+          setUseIframeFallback(true);
         }}
         style={{
           position: 'fixed',

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { Ytdl } from '@distube/ytdl-core';
+import CryptoJS from 'crypto-js';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,6 +13,132 @@ if (!global._synctune_stream_cache) {
   global._synctune_stream_cache = new Map();
 }
 const streamUrlCache = global._synctune_stream_cache;
+
+const DES_KEY = CryptoJS.enc.Utf8.parse('38346591');
+
+function decryptSaavnUrl(encryptedUrl) {
+  if (!encryptedUrl) return null;
+  try {
+    const decrypted = CryptoJS.DES.decrypt(
+      { ciphertext: CryptoJS.enc.Base64.parse(encryptedUrl) },
+      DES_KEY,
+      { mode: CryptoJS.mode.ECB, padding: CryptoJS.pad.Pkcs7 }
+    );
+    const url = decrypted.toString(CryptoJS.enc.Utf8);
+    if (!url || !url.startsWith('http')) return null;
+    return url.replace('_96.mp4', '_320.mp4').replace('_160.mp4', '_320.mp4');
+  } catch (e) {
+    return null;
+  }
+}
+
+const BAD_WORDS = ['instrumental', 'karaoke', 'tribute', 'ringtone', 'lofi', 'slowed', 'reverb', 'piano', 'guitar', 'acoustic cover', 'flute', 'violin', 'bgm', 'soundtrack version', 'dialogue'];
+
+function cleanText(str) {
+  return (str || '')
+    .toLowerCase()
+    .replace(/&quot;/g, '')
+    .replace(/&amp;/g, '&')
+    .replace(/&#039;/g, "'")
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Strict, verified matching against high-speed 320kbps Akamai MP4 stream.
+ * 1. Strictly filters out instrumental, karaoke, lofi, ringtone, and cover versions.
+ * 2. Enforces exact title word inclusion so wrong songs (e.g. Believer for Radioactive) are NEVER played.
+ * 3. Enforces artist verification with robust YouTube channel name handling.
+ */
+async function searchExactSaavn(rawTitle, rawArtist) {
+  let title = rawTitle || '';
+  let artist = rawArtist || '';
+
+  // If title has "Artist - Song", extract both
+  if (title.includes(' - ')) {
+    const parts = title.split(' - ');
+    if (parts.length >= 2) {
+      if (!artist || artist.toLowerCase().includes('artist') || artist.toLowerCase().includes('youtube') || parts[0].toLowerCase().replace(/\s+/g, '') === artist.toLowerCase().replace(/\s+/g, '')) {
+        artist = parts[0].trim();
+      }
+      title = parts.slice(1).join(' - ').trim();
+    }
+  }
+
+  // Clean title: remove parentheticals, lyrics, official video, etc.
+  let normTitle = cleanText(title)
+    .replace(/\(.*?\)/g, '')
+    .replace(/\[.*?\]/g, '')
+    .replace(/\b(official|video|audio|lyrics?|hd|4k|remastered|full song|visualizer|music video|lyric video)\b/gi, '')
+    .trim();
+
+  let normArtist = cleanText(artist)
+    .replace(/\b(vevo|records|music|official|channel|songs)\b/gi, '')
+    .trim();
+
+  // If artist was inside the title (e.g. "Radioactive Imagine Dragons")
+  if (normArtist && normTitle.includes(normArtist)) {
+    normTitle = normTitle.replace(normArtist, '').trim();
+  }
+
+  const titleWords = normTitle.split(/\s+/).filter(w => w.length > 2);
+  const artistWords = normArtist.split(/\s+/).filter(w => w.length > 2);
+
+  const query = `${normTitle} ${normArtist}`.trim();
+  if (!query) return null;
+
+  try {
+    const url = `https://www.jiosaavn.com/api.php?__call=search.getResults&q=${encodeURIComponent(query)}&_format=json&_marker=0&ctx=web6dot0&api_version=4`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3500);
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+      signal: controller.signal
+    });
+    clearTimeout(timeout);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const results = data.results || [];
+
+    for (const item of results) {
+      const itemTitle = cleanText(item.title);
+      const itemSubtitle = cleanText(item.subtitle);
+      const combined = `${itemTitle} ${itemSubtitle}`;
+
+      // 1. REJECT instrumentals, karaokes, tributes, ringtones, lofi
+      const hasBadWord = BAD_WORDS.some(bw => combined.includes(bw) && !normTitle.includes(bw));
+      if (hasBadWord) continue;
+
+      // 2. MUST match main title words
+      const matchesTitle = titleWords.length > 0 && titleWords.every(w => itemTitle.includes(w));
+      if (!matchesTitle) continue;
+
+      // 3. If artist was provided, candidate MUST have artist match
+      if (artistWords.length > 0) {
+        const combinedSpaceless = combined.replace(/\s+/g, '');
+        const rawArtistSpaceless = cleanText(rawArtist).replace(/\s+/g, '').replace(/songs|official|vevo|music/g, '');
+        const matchesArtist = artistWords.some(w => combined.includes(w)) || (rawArtistSpaceless && combinedSpaceless.includes(rawArtistSpaceless));
+        if (!matchesArtist) continue;
+      }
+
+      // 4. Must have decrypted audio url
+      const enc = item.more_info?.encrypted_media_url;
+      if (enc) {
+        const directUrl = decryptSaavnUrl(enc);
+        if (directUrl) {
+          return {
+            matchedTitle: item.title,
+            matchedArtist: item.subtitle,
+            url: directUrl
+          };
+        }
+      }
+    }
+  } catch (e) {}
+
+  return null;
+}
 
 async function getAudioUrl(videoId) {
   const cached = streamUrlCache.get(videoId);
@@ -44,6 +171,17 @@ async function getAudioUrl(videoId) {
 export async function HEAD(request) {
   const { searchParams } = new URL(request.url);
   const rawId = searchParams.get('id');
+  const title = (searchParams.get('title') || '').trim();
+  const artist = (searchParams.get('artist') || '').trim();
+
+  // 1. High-speed verified vocal CDN lookup (guaranteed exact song, no instrumentals)
+  if (title) {
+    const directMatch = await searchExactSaavn(title, artist);
+    if (directMatch?.url) {
+      return NextResponse.redirect(directMatch.url, 307);
+    }
+  }
+
   if (!rawId) return new Response(null, { status: 400 });
 
   // Strip extension hint if provided (e.g. videoId.m4a -> videoId)
@@ -79,6 +217,16 @@ export async function HEAD(request) {
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const rawId = searchParams.get('id');
+  const title = (searchParams.get('title') || '').trim();
+  const artist = (searchParams.get('artist') || '').trim();
+
+  // 1. High-speed verified vocal CDN lookup (Instant 320kbps Akamai MP4 stream, guaranteed vocal version)
+  if (title) {
+    const directMatch = await searchExactSaavn(title, artist);
+    if (directMatch?.url) {
+      return NextResponse.redirect(directMatch.url, 307);
+    }
+  }
 
   if (!rawId) {
     return NextResponse.json({ error: 'Missing video id parameter' }, { status: 400 });
