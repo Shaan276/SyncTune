@@ -109,18 +109,59 @@ async function fetchFromYouTube(searchQuery, excludeId = '') {
             const videoId = video.videoId;
             if (!videoId || seen.has(videoId)) continue;
 
-            const durationText = video.lengthText?.simpleText || '3:30';
+            // 1. REJECT LIVE STREAMS & 24/7 BROADCASTS
+            // Regular YouTube videos ALWAYS have lengthText with simpleText. Live streams DO NOT.
+            if (!video.lengthText || !video.lengthText.simpleText) {
+              continue;
+            }
+
+            // Check badges for live / premiere
+            const isLiveBadge = video.badges?.some(b => {
+              const label = (b.metadataBadgeRenderer?.label || '').toLowerCase();
+              const style = (b.metadataBadgeRenderer?.style || '').toLowerCase();
+              return label.includes('live') || style.includes('live') || label.includes('premiere') || style.includes('premiere');
+            });
+            if (isLiveBadge) continue;
+
+            // Check thumbnail overlays for LIVE style
+            const isLiveOverlay = video.thumbnailOverlays?.some(o => {
+              const style = (o.thumbnailOverlayTimeStatusRenderer?.style || '').toLowerCase();
+              const text = (o.thumbnailOverlayTimeStatusRenderer?.text?.runs?.[0]?.text || '').toLowerCase();
+              return style.includes('live') || text.includes('live');
+            });
+            if (isLiveOverlay) continue;
+
+            const title = video.title?.runs?.[0]?.text || 'YouTube Song';
+            let artist = video.ownerText?.runs?.[0]?.text || 'YouTube Artist';
+            artist = cleanArtistName(artist);
+
+            const titleLower = title.toLowerCase();
+            const artistLower = artist.toLowerCase();
+
+            // Check for 24/7, live radio, and continuous stream indicators
+            if (
+              titleLower.includes('24/7') ||
+              titleLower.includes('live stream') ||
+              titleLower.includes('live radio') ||
+              titleLower.includes('livestream') ||
+              titleLower.includes('live 24/7') ||
+              titleLower.includes('🔴') ||
+              titleLower.includes('live now') ||
+              titleLower.includes('radio live') ||
+              artistLower.includes('24/7') ||
+              artistLower.includes('radio 24/7')
+            ) {
+              continue;
+            }
+
+            const durationText = video.lengthText.simpleText;
             const parts = durationText.split(':').map(Number);
             let duration = 210;
             if (parts.length === 2) duration = parts[0] * 60 + parts[1];
             else if (parts.length === 3) duration = parts[0] * 3600 + parts[1] * 60 + parts[2];
 
-            // Strict limit: Songs under 10 minutes
-            if (duration > 600) continue;
-
-            const title = video.title?.runs?.[0]?.text || 'YouTube Song';
-            let artist = video.ownerText?.runs?.[0]?.text || 'YouTube Artist';
-            artist = cleanArtistName(artist);
+            // Strict limit: Songs under 10 minutes and at least 30 seconds
+            if (duration > 600 || duration < 30) continue;
 
             seen.add(videoId);
             songs.push({

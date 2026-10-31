@@ -131,7 +131,14 @@ export default function Home() {
       }
       const storedQueue = localStorage.getItem('synctune_queue');
       if (storedQueue) {
-        setQueue(JSON.parse(storedQueue));
+        try {
+          const parsedQ = JSON.parse(storedQueue);
+          const cleanQ = parsedQ.filter(s => {
+            const t = (s.title || '').toLowerCase();
+            return !t.includes('24/7') && !t.includes('live stream') && !t.includes('🔴') && !t.includes('live radio') && (s.duration || 0) <= 600;
+          });
+          setQueue(cleanQ);
+        } catch (e) {}
       }
       const storedAutoplayMode = localStorage.getItem('synctune_autoplay_mode');
       if (storedAutoplayMode) {
@@ -202,7 +209,9 @@ export default function Home() {
       const newTracks = [];
 
       for (const track of candidates) {
-        if (!existingIds.has(track.id) && (track.duration || 210) <= 600) {
+        const titleLower = (track.title || '').toLowerCase();
+        const isLive = titleLower.includes('24/7') || titleLower.includes('live stream') || titleLower.includes('🔴') || titleLower.includes('live radio');
+        if (!existingIds.has(track.id) && (track.duration || 210) <= 600 && !isLive) {
           existingIds.add(track.id);
           newTracks.push(track);
           if (newTracks.length >= deficit) break;
@@ -427,8 +436,13 @@ export default function Home() {
           ? [...(recs.artistTracks || []), ...(recs.genreTracks || [])]
           : [...(recs.genreTracks || []), ...(recs.artistTracks || [])];
 
+        const filteredPool = pool.filter(s => {
+          const t = (s.title || '').toLowerCase();
+          return !t.includes('24/7') && !t.includes('live stream') && !t.includes('🔴') && !t.includes('live radio') && (s.duration || 210) <= 600;
+        });
+
         const existingIds = new Set([nextSong.id, ...remainingQueue.map(s => s.id)]);
-        const candidate = pool.find(s => !existingIds.has(s.id) && (s.duration || 210) <= 600) || pool[0];
+        const candidate = filteredPool.find(s => !existingIds.has(s.id)) || filteredPool[0];
 
         const updatedQueue = candidate ? [...remainingQueue, candidate] : remainingQueue;
         setQueue(updatedQueue);
@@ -447,7 +461,10 @@ export default function Home() {
         const list = autoplayModeRef.current === 'artist'
           ? [...(recs.artistTracks || []), ...(recs.genreTracks || [])]
           : [...(recs.genreTracks || []), ...(recs.artistTracks || [])];
-        const valid = list.filter(s => s.id !== currentSongRef.current?.id && (s.duration || 210) <= 600);
+        const valid = list.filter(s => {
+          const t = (s.title || '').toLowerCase();
+          return s.id !== currentSongRef.current?.id && !t.includes('24/7') && !t.includes('live stream') && !t.includes('🔴') && !t.includes('live radio') && (s.duration || 210) <= 600;
+        });
         if (valid.length > 0) {
           handlePlaySong(valid[0]);
           setQueue(valid.slice(1, 10));
