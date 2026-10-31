@@ -88,6 +88,13 @@ async function searchSaavnFast(query, maxDurationSeconds = 600) {
         artist = artist.split(' - ')[0].trim();
       }
 
+      // Filter out karaoke, instrumental, tribute, and cover tracks unless explicitly searched
+      const combinedLower = `${title} ${artist}`.toLowerCase();
+      const isKaraokeOrInst = ['karaoke', 'instrumental', 'tribute', 'backing track', 'lofi', 'slowed', 'reverb', 'ringtone'].some(b => combinedLower.includes(b));
+      if (isKaraokeOrInst && !query.toLowerCase().includes('karaoke') && !query.toLowerCase().includes('instrumental')) {
+        continue;
+      }
+
       const enc = item.more_info?.encrypted_media_url;
       const directAudioUrl = enc ? decryptSaavnUrl(enc) : null;
       const rawImg = item.image || '';

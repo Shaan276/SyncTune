@@ -53,7 +53,7 @@ function cleanText(str) {
  * 2. Enforces exact title word inclusion so wrong songs are NEVER played.
  * 3. Enforces artist verification with robust YouTube channel name handling.
  */
-async function searchExactSaavn(rawTitle, rawArtist) {
+async function searchExactSaavn(rawTitle, rawArtist, onDebug = null) {
   let title = rawTitle || '';
   let artist = rawArtist || '';
 
@@ -90,6 +90,7 @@ async function searchExactSaavn(rawTitle, rawArtist) {
   const artistWords = normArtist.split(/\s+/).filter(w => w.length > 2);
 
   const query = `${normTitle} ${normArtist}`.trim();
+  if (onDebug) onDebug({ normTitle, normArtist, query, titleWords, artistWords });
   if (!query) return null;
 
   try {
@@ -97,13 +98,20 @@ async function searchExactSaavn(rawTitle, rawArtist) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 3500);
     const res = await fetch(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9'
+      },
       signal: controller.signal
     });
     clearTimeout(timeout);
-    if (!res.ok) return null;
+    if (!res.ok) {
+      if (onDebug) onDebug({ error: 'fetch failed', status: res.status });
+      return null;
+    }
     const data = await res.json();
     let results = data.results || [];
+    if (onDebug) onDebug({ resultsCount: results.length, firstThree: results.slice(0, 3).map(r => ({ title: r.title, subtitle: r.subtitle })) });
 
     // Fallback query if no results with combined artist
     if (results.length === 0 && normTitle.length > 3) {
@@ -240,10 +248,15 @@ export async function GET(request) {
   const rawId = searchParams.get('id');
   const title = (searchParams.get('title') || '').trim();
   const artist = (searchParams.get('artist') || '').trim();
+  const debug = searchParams.get('debug');
 
   // 1. High-speed verified vocal CDN lookup
   if (title) {
-    const directMatch = await searchExactSaavn(title, artist);
+    let debugInfo = null;
+    const directMatch = await searchExactSaavn(title, artist, (info) => { debugInfo = info; });
+    if (debug) {
+      return NextResponse.json({ debugInfo, directMatch });
+    }
     if (directMatch?.url) {
       return NextResponse.redirect(directMatch.url, 307);
     }
