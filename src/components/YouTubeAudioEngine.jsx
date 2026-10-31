@@ -20,6 +20,7 @@ export default function YouTubeAudioEngine({
   const playerRef = useRef(null);
   const isReadyRef = useRef(false);
   const lastSongIdRef = useRef(null);
+  const lastPlayTriggerRef = useRef(null);
   const isPlayingRef = useRef(isPlaying);
   isPlayingRef.current = isPlaying;
 
@@ -390,12 +391,16 @@ export default function YouTubeAudioEngine({
     };
   }, [volume, currentSong?.audioUrl, currentSong?.title, currentSong?.artist]);
 
-  // 5. Track change handler
+  // 5. Track change handler: ONLY load new source if the song ID changed OR an explicit new play was triggered
   useEffect(() => {
     if (!currentSong?.id) return;
 
-    if (currentSong.id !== lastSongIdRef.current || currentSong.playTrigger) {
+    const isNewSong = currentSong.id !== lastSongIdRef.current;
+    const isExplicitNewPlay = Boolean(currentSong.playTrigger && currentSong.playTrigger !== lastPlayTriggerRef.current);
+
+    if (isNewSong || isExplicitNewPlay) {
       lastSongIdRef.current = currentSong.id;
+      lastPlayTriggerRef.current = currentSong.playTrigger || Date.now();
       setUseIframeFallback(false);
 
       if (audioRef.current) {
@@ -409,7 +414,7 @@ export default function YouTubeAudioEngine({
         }
       }
     }
-  }, [currentSong?.id, currentSong?.audioUrl, currentSong?.title, currentSong?.artist, currentSong?.playTrigger, isPlaying, volume]);
+  }, [currentSong?.id, currentSong?.audioUrl, currentSong?.title, currentSong?.artist, currentSong?.playTrigger, volume]);
 
   // 6. Volume change
   useEffect(() => {
