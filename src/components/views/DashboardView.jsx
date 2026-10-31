@@ -1,6 +1,6 @@
 'use client';
-import React, { useState, useEffect, useRef } from 'react';
-import { Play, Plus, Heart, Music, Sparkles, Flame, History, Trash2, Compass, Radio, Search, Zap, Clock, ShieldCheck, ArrowRight } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Play, Plus, Heart, Music, Sparkles, Flame, History, Trash2, Compass, Radio, Search, Zap, Clock, ShieldCheck, ArrowRight, RotateCw } from 'lucide-react';
 import { getUserRecommendations, formatPlayMultiplier, formatFullDateTime, getSongListenCount, formatTime, fetchLiveRecommendations } from '../../lib/youtube';
 
 export default function DashboardView({
@@ -16,58 +16,91 @@ export default function DashboardView({
   onNavigateTab
 }) {
   const [recommendations, setRecommendations] = useState([]);
+  const [isRefreshingRecs, setIsRefreshingRecs] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState('music');
   const [subTab, setSubTab] = useState('flow'); // 'flow', 'rooms', 'discover'
   const searchInputRef = useRef(null);
 
-  // Update recommendations whenever actual history changes: merges user favorites with fresh newly discovered vibe tracks
-  useEffect(() => {
-    let active = true;
+  // Dynamic recommendation refresh: mixes familiar favorites with brand new vibe tracks
+  const refreshRecommendations = useCallback(async (forceRefresh = false) => {
+    setIsRefreshingRecs(true);
+    try {
+      if (!history || history.length === 0) {
+        setRecommendations([]);
+        return;
+      }
 
-    if (!history || history.length === 0) {
-      setRecommendations([]);
-      return;
-    }
+      // 1. Get most played favorite songs from history
+      const userFavorites = getUserRecommendations(history);
+      const historyIds = new Set(history.map((s) => s.id));
 
-    // 1. Get most played favorite songs from history
-    const userFavorites = getUserRecommendations(history);
+      // 2. Pick 3-4 familiar songs from favorites (shuffled for freshness on every refresh)
+      const shuffledFavorites = [...userFavorites].sort(() => Math.random() - 0.5);
+      const familiarTracks = shuffledFavorites.slice(0, 4).map((s) => ({ ...s, isNew: false }));
 
-    // 2. Fetch fresh new recommendations based on user's recent listened songs
-    const recentSong = history[0];
-    if (recentSong && recentSong.title) {
-      fetchLiveRecommendations(recentSong).then((recs) => {
-        if (!active) return;
-        const newTracks = [...(recs.genreTracks || []), ...(recs.artistTracks || [])]
-          .filter((t) => t.id !== recentSong.id && (t.duration || 210) <= 600);
-
-        const seenIds = new Set();
-        const combined = [];
-
-        // Mix user listened tracks with new recommendations based on their music taste
-        for (const fav of userFavorites) {
-          if (!seenIds.has(fav.id)) {
-            seenIds.add(fav.id);
-            combined.push(fav);
-          }
+      // 3. Sample 1-2 seed songs from history to discover fresh new music
+      const sampleSeeds = [];
+      if (history.length > 0) {
+        const randIdx = Math.floor(Math.random() * Math.min(5, history.length));
+        sampleSeeds.push(history[randIdx]);
+        if (history.length > 2) {
+          const randIdx2 = Math.floor(Math.random() * history.length);
+          if (randIdx2 !== randIdx) sampleSeeds.push(history[randIdx2]);
         }
-        for (const track of newTracks) {
-          if (!seenIds.has(track.id)) {
-            seenIds.add(track.id);
-            combined.push(track);
-          }
+      }
+
+      let newCandidates = [];
+      for (const seed of sampleSeeds) {
+        if (!seed || !seed.title) continue;
+        const recs = await fetchLiveRecommendations(seed, forceRefresh);
+        const candidates = [...(recs.genreTracks || []), ...(recs.artistTracks || [])]
+          .filter((t) => !historyIds.has(t.id) && (t.duration || 210) <= 600);
+        newCandidates.push(...candidates);
+      }
+
+      // Deduplicate new discoveries
+      const seenNew = new Set();
+      const uniqueNew = [];
+      for (const t of newCandidates) {
+        if (!seenNew.has(t.id) && !historyIds.has(t.id)) {
+          seenNew.add(t.id);
+          uniqueNew.push({ ...t, isNew: true });
         }
+      }
 
-        setRecommendations(combined.slice(0, 10));
-      });
-    } else {
-      setRecommendations(userFavorites);
+      // Shuffle new discoveries
+      uniqueNew.sort(() => Math.random() - 0.5);
+      const selectedNew = uniqueNew.slice(0, 6);
+
+      // Interleave familiar and new tracks (e.g. New, New, Familiar, New, New, Familiar)
+      const combined = [];
+      let fi = 0, ni = 0;
+      while (combined.length < 10 && (fi < familiarTracks.length || ni < selectedNew.length)) {
+        if (ni < selectedNew.length) combined.push(selectedNew[ni++]);
+        if (ni < selectedNew.length) combined.push(selectedNew[ni++]);
+        if (fi < familiarTracks.length) combined.push(familiarTracks[fi++]);
+      }
+
+      // If we don't have enough new discoveries, fill remaining slots with other user favorites
+      for (const fav of shuffledFavorites) {
+        if (!combined.some((s) => s.id === fav.id)) {
+          combined.push({ ...fav, isNew: false });
+        }
+        if (combined.length >= 10) break;
+      }
+
+      setRecommendations(combined);
+    } catch (err) {
+      console.error('Refresh recommendations error:', err);
+    } finally {
+      setIsRefreshingRecs(false);
     }
-
-    return () => {
-      active = false;
-    };
   }, [history]);
+
+  useEffect(() => {
+    refreshRecommendations(false);
+  }, [refreshRecommendations]);
 
   const handleSearchSubmit = (e) => {
     e.preventDefault();
@@ -368,15 +401,25 @@ export default function DashboardView({
             <p className="text-xs text-zinc-500">
               {recommendations.length === 0
                 ? 'Personalized from your listened songs'
-                : `Top ${recommendations.length} most frequently played tracks`}
+                : `Fresh mix based on your previous listening`}
             </p>
           </div>
 
-          {recommendations.length > 0 && (
-            <span className="text-[10px] text-emerald-300 font-bold px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 font-mono">
-              {recommendations.length} Tracks
-            </span>
-          )}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => refreshRecommendations(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-emerald-400 hover:text-emerald-300 border border-emerald-500/20 text-xs font-bold transition-all cursor-pointer"
+              title="Refresh recommendations with new songs"
+            >
+              <RotateCw className={`w-3.5 h-3.5 ${isRefreshingRecs ? 'animate-spin' : ''}`} />
+              <span>Refresh</span>
+            </button>
+            {recommendations.length > 0 && (
+              <span className="text-[10px] text-emerald-300 font-bold px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 font-mono">
+                {recommendations.length} Tracks
+              </span>
+            )}
+          </div>
         </div>
 
         {recommendations.length > 0 ? (
@@ -408,8 +451,14 @@ export default function DashboardView({
                     />
 
                     <div className="absolute bottom-1.5 left-1.5 px-2 py-0.5 rounded bg-black/80 text-[10px] font-bold text-emerald-300 border border-emerald-500/30 flex items-center gap-1 font-mono">
-                      <Flame className="w-3 h-3 text-amber-400" />
-                      <span>{formatPlayMultiplier(song.playCount || 1)}</span>
+                      {song.isNew ? (
+                        <span className="text-emerald-400 font-black">NEW</span>
+                      ) : (
+                        <>
+                          <Flame className="w-3 h-3 text-amber-400" />
+                          <span>{formatPlayMultiplier(song.playCount || 1)}</span>
+                        </>
+                      )}
                     </div>
 
                     <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center gap-2 transition-opacity">

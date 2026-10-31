@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 
-// In-memory global store for rooms
+// In-memory global store for rooms across requests
 if (!global._synctune_rooms) {
   global._synctune_rooms = {};
 }
@@ -23,37 +23,53 @@ function generateUniqueCode() {
   return `SYNC${num}`;
 }
 
+function getOrCreateRoom(code, user = null) {
+  if (!roomsStore[code]) {
+    roomsStore[code] = {
+      code,
+      host_name: user?.username || 'Host',
+      host_id: user?.id || 'host',
+      isPrivate: true,
+      allowListenerControl: true,
+      controlMode: 'collaborative',
+      members: user ? [{ id: user.id, username: user.username, isHost: true, isOnline: true }] : [],
+      currentSong: null,
+      isPlaying: false,
+      currentTime: 0,
+      lastUpdated: Date.now(),
+      chats: [],
+      queueVotes: {}
+    };
+  }
+  return roomsStore[code];
+}
+
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const action = searchParams.get('action') || 'list';
-  const code = normalizeRoomCode(searchParams.get('code'));
+  const rawCode = searchParams.get('code');
+  const code = normalizeRoomCode(rawCode);
 
-  // 1. List Public Rooms
+  // 1. List Rooms
   if (action === 'list') {
-    const list = Object.values(roomsStore)
-      .filter((r) => !r.isPrivate)
-      .map((r) => ({
-        code: r.code,
-        host_name: r.host_name,
-        member_count: (r.members || []).length,
-        song_title: r.currentSong?.title || 'No song playing',
-        song_artist: r.currentSong?.artist || 'SyncTune',
-        is_playing: r.isPlaying ? 1 : 0,
-        isPrivate: false,
-        allowListenerControl: r.allowListenerControl !== false,
-        controlMode: r.allowListenerControl === false ? 'host_only' : 'collaborative'
-      }));
+    const list = Object.values(roomsStore).map((r) => ({
+      code: r.code,
+      host_name: r.host_name,
+      member_count: (r.members || []).length,
+      song_title: r.currentSong?.title || 'No song playing',
+      song_artist: r.currentSong?.artist || 'SyncTune',
+      is_playing: r.isPlaying ? 1 : 0,
+      isPrivate: true,
+      allowListenerControl: r.allowListenerControl !== false,
+      controlMode: r.allowListenerControl === false ? 'host_only' : 'collaborative'
+    }));
     return NextResponse.json({ success: true, rooms: list });
   }
 
-  // 2. Get specific room status
+  // 2. Get Room Status (NEVER return 404 for a valid room code format to avoid serverless sync splits)
   if (action === 'get' && code) {
-    const room = roomsStore[code];
-    if (!room) {
-      return NextResponse.json({ success: false, error: 'Room not found' }, { status: 404 });
-    }
+    const room = getOrCreateRoom(code);
 
-    // Calculate real-time elapsed playback position if playing
     let currentCalculatedTime = room.currentTime || 0;
     if (room.isPlaying && room.lastUpdated) {
       const elapsed = Math.max(0, (Date.now() - room.lastUpdated) / 1000);
@@ -76,13 +92,13 @@ export async function GET(request) {
       lastUpdated: room.lastUpdated || Date.now(),
       chats: room.chats || [],
       queueVotes: room.queueVotes || {},
-      isPrivate: Boolean(room.isPrivate),
+      isPrivate: true,
       allowListenerControl: room.allowListenerControl !== false,
       controlMode: room.allowListenerControl === false ? 'host_only' : 'collaborative'
     });
   }
 
-  return NextResponse.json({ success: true, rooms: Object.values(roomsStore).filter(r => !r.isPrivate) });
+  return NextResponse.json({ success: true, rooms: Object.values(roomsStore) });
 }
 
 export async function POST(request) {
@@ -90,9 +106,8 @@ export async function POST(request) {
     const body = await request.json().catch(() => ({}));
     const action = body.action || 'join';
     const user = body.user || { id: Date.now(), username: body.username || 'Listener' };
-    const isPrivate = Boolean(body.isPrivate);
 
-    // CREATE ROOM
+    // 1. CREATE ROOM
     if (action === 'create') {
       let code = normalizeRoomCode(body.code);
       if (!code) {
@@ -130,17 +145,14 @@ export async function POST(request) {
       });
     }
 
-    // JOIN ROOM
+    // 2. JOIN ROOM
     if (action === 'join') {
       const code = normalizeRoomCode(body.code);
       if (!code) {
         return NextResponse.json({ success: false, error: 'Please enter a room code.' }, { status: 400 });
       }
 
-      const room = roomsStore[code];
-      if (!room) {
-        return NextResponse.json({ success: false, error: `Room "${code}" not found. Please verify the code.` }, { status: 404 });
-      }
+      const room = getOrCreateRoom(code, user);
 
       const existingMember = room.members.find((m) => String(m.id) === String(user.id));
       if (!existingMember) {
@@ -175,15 +187,30 @@ export async function POST(request) {
     }
 
     const code = normalizeRoomCode(body.code);
-    const room = roomsStore[code];
-    if (!room) {
-      return NextResponse.json({ success: false, error: 'Room not found' }, { status: 404 });
+    if (!code) {
+      return NextResponse.json({ success: false, error: 'Room code required.' }, { status: 400 });
     }
 
+    const room = getOrCreateRoom(code, user);
     const isHost = String(room.host_id) === String(user.id);
     const canControl = room.allowListenerControl !== false || isHost;
 
-    // PLAY SONG IN ROOM
+    // 3. BROADCAST SYNC / STATE REPLICATION
+    if (action === 'sync') {
+      if (body.currentSong !== undefined) room.currentSong = body.currentSong;
+      if (body.isPlaying !== undefined) room.isPlaying = Boolean(body.isPlaying);
+      if (body.currentTime !== undefined) room.currentTime = body.currentTime;
+      if (body.host_name) room.host_name = body.host_name;
+      if (body.allowListenerControl !== undefined) room.allowListenerControl = Boolean(body.allowListenerControl);
+      if (body.queueVotes) room.queueVotes = body.queueVotes;
+      if (body.chats && Array.isArray(body.chats)) {
+        room.chats = body.chats.slice(-50);
+      }
+      room.lastUpdated = Date.now();
+      return NextResponse.json({ success: true, room });
+    }
+
+    // 4. PLAY SONG IN ROOM
     if (action === 'play') {
       if (!canControl) {
         return NextResponse.json({ success: false, error: 'Only the room host can control music playback in this room.' }, { status: 403 });
@@ -197,7 +224,7 @@ export async function POST(request) {
       }
     }
 
-    // PAUSE / RESUME IN ROOM
+    // 5. PAUSE / RESUME IN ROOM
     if (action === 'pause' || action === 'resume') {
       if (!canControl) {
         return NextResponse.json({ success: false, error: 'Only the room host can control music playback in this room.' }, { status: 403 });
@@ -210,7 +237,7 @@ export async function POST(request) {
       return NextResponse.json({ success: true, room });
     }
 
-    // SEEK IN ROOM
+    // 6. SEEK IN ROOM
     if (action === 'seek') {
       if (!canControl) {
         return NextResponse.json({ success: false, error: 'Only the room host can control music playback in this room.' }, { status: 403 });
@@ -220,7 +247,7 @@ export async function POST(request) {
       return NextResponse.json({ success: true, room });
     }
 
-    // CHAT MESSAGE IN ROOM
+    // 7. CHAT MESSAGE IN ROOM
     if (action === 'chat') {
       if (body.message) {
         if (!room.chats) room.chats = [];
@@ -236,7 +263,7 @@ export async function POST(request) {
       }
     }
 
-    // UPVOTE IN ROOM
+    // 8. UPVOTE IN ROOM
     if (action === 'upvote') {
       if (body.songId) {
         room.queueVotes[body.songId] = (room.queueVotes[body.songId] || 0) + 1;
@@ -244,7 +271,7 @@ export async function POST(request) {
       }
     }
 
-    // LEAVE ROOM
+    // 9. LEAVE ROOM
     if (action === 'leave') {
       room.members = room.members.filter((m) => String(m.id) !== String(user.id));
       if (room.members.length === 0) {

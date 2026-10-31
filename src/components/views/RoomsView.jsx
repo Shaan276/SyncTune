@@ -137,6 +137,45 @@ export default function RoomsView({
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chats]);
 
+  // Real-Time Cross-Window / Cross-Tab Room Events (Chats, Reactions, Upvotes, Queue)
+  useEffect(() => {
+    if (typeof window === 'undefined' || !activeRoom) return;
+
+    let ch = null;
+    try {
+      ch = new BroadcastChannel('synctune_room_events_' + activeRoom);
+      ch.onmessage = (event) => {
+        const msg = event.data;
+        if (!msg || !msg.type) return;
+
+        if (msg.type === 'CHAT' && msg.chat) {
+          setChats((prev) => {
+            if (prev.some((c) => String(c.id) === String(msg.chat.id))) return prev;
+            return [...prev, msg.chat];
+          });
+        } else if (msg.type === 'REACTION' && msg.emoji) {
+          triggerLocalReaction(msg.emoji, msg.senderName || 'Listener');
+        } else if (msg.type === 'UPVOTE' && msg.songId) {
+          setQueueVotes((prev) => ({
+            ...prev,
+            [msg.songId]: (prev[msg.songId] || 0) + 1
+          }));
+        } else if (msg.type === 'ADD_QUEUE' && msg.song) {
+          setRoomRecommendations((prev) => {
+            if (prev.some((s) => s.id === msg.song.id)) return prev;
+            return [msg.song, ...prev];
+          });
+        }
+      };
+    } catch (e) {}
+
+    return () => {
+      try {
+        ch?.close();
+      } catch (e) {}
+    };
+  }, [activeRoom]);
+
   // 1. Fetch and Sync Active Room State
   const syncRoomState = useCallback(async (codeToSync) => {
     const code = codeToSync || activeRoomRef.current;
@@ -180,7 +219,7 @@ export default function RoomsView({
     return () => clearInterval(pollTimer);
   }, [activeRoom, syncRoomState]);
 
-  // 2. Create Room Handler (Always Private, simple code like SYNC1962)
+  // 2. Create Room Handler (Always Private, instant 0ms response, code like SYNC1962)
   const handleCreateNewRoom = async () => {
     // Stop any currently playing solo song immediately!
     if (typeof window !== 'undefined' && window.syncTunePauseAudio) {
@@ -191,12 +230,25 @@ export default function RoomsView({
     }
 
     const stableUser = getStableUser(user);
+    const generatedCode = 'SYNC' + Math.floor(1000 + Math.random() * 9000);
+
+    // Instant 0ms transition into room UI
+    setActiveRoom(generatedCode);
+    setRoomHost(stableUser.username || 'Host');
+    setRoomHostId(stableUser.id);
+    setRoomAllowListenerControl(allowListenerControl);
+    setMembers([{ id: stableUser.id, username: stableUser.username, isHost: true }]);
+    setRoomRecommendations(DEFAULT_ROOM_QUEUE);
+    setChats([]);
+    setQueueVotes({});
+
     try {
       const res = await fetch('/api/room', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'create',
+          code: generatedCode,
           user: stableUser,
           isPrivate: true,
           allowListenerControl: allowListenerControl
@@ -205,19 +257,20 @@ export default function RoomsView({
 
       const data = await res.json().catch(() => null);
       if (res.ok && data && data.success && data.room) {
-        setActiveRoom(data.room.code);
+        if (data.room.code !== generatedCode) {
+          setActiveRoom(data.room.code);
+        }
         setRoomHost(data.room.host_name);
         setRoomHostId(data.room.host_id);
         setRoomAllowListenerControl(data.room.allowListenerControl !== false);
         setMembers(data.members || [{ id: stableUser.id, username: stableUser.username, isHost: true }]);
-        setRoomRecommendations(DEFAULT_ROOM_QUEUE);
       }
     } catch (err) {
       console.error("Create room error:", err);
     }
   };
 
-  // 3. Join Room Handler (Instantly joins without duplicate room creation)
+  // 3. Join Room Handler (Instant 0ms join without lag)
   const handleJoinRoom = async (codeToJoin) => {
     setJoinError('');
     let rawCode = (codeToJoin || inputCode).toUpperCase().trim().replace(/[\s-]+/g, '');
@@ -236,6 +289,12 @@ export default function RoomsView({
 
     const stableUser = getStableUser(user);
 
+    // Instant 0ms UI transition
+    setActiveRoom(rawCode);
+    setInputCode('');
+    setMembers((prev) => prev.length ? prev : [{ id: stableUser.id, username: stableUser.username }]);
+    setRoomRecommendations(DEFAULT_ROOM_QUEUE);
+
     try {
       const res = await fetch('/api/room', {
         method: 'POST',
@@ -249,8 +308,6 @@ export default function RoomsView({
 
       const data = await res.json().catch(() => null);
       if (res.ok && data && data.success && data.room) {
-        setActiveRoom(data.room.code);
-        setInputCode('');
         setRoomHost(data.room.host_name);
         setRoomHostId(data.room.host_id);
         setRoomAllowListenerControl(data.room.allowListenerControl !== false);
@@ -263,11 +320,9 @@ export default function RoomsView({
         if (data.currentSong && data.isPlaying && onPlaySong) {
           onPlaySong(data.currentSong, true);
         }
-      } else {
-        setJoinError(data?.error || `Room "${rawCode}" not found. Please verify the code.`);
       }
     } catch (err) {
-      setJoinError('Network error joining room.');
+      console.error('Join room error:', err);
     }
   };
 
@@ -332,6 +387,12 @@ export default function RoomsView({
       return [song, ...prev];
     });
     setRoomSearchResults([]);
+
+    try {
+      const ch = new BroadcastChannel('synctune_room_events_' + activeRoom);
+      ch.postMessage({ type: 'ADD_QUEUE', song });
+      ch.close();
+    } catch (e) {}
   };
 
   // 7. Dynamic recommendations for the room based on currently playing song
@@ -355,7 +416,7 @@ export default function RoomsView({
     };
   }, [currentSong?.id, currentSong?.artist]);
 
-  // 8. Inside room search (Fast & Responsive)
+  // 8. Inside room search (Fast & Responsive with 4s timeout guarantee)
   const handleRoomSearch = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
     const q = roomSearchQuery.trim();
@@ -363,8 +424,10 @@ export default function RoomsView({
 
     setIsSearching(true);
     try {
-      const results = await searchYouTube(q, 'music');
-      setRoomSearchResults(results.filter((s) => (s.duration || 210) <= 600).slice(0, 8));
+      const searchPromise = searchYouTube(q, 'music');
+      const timeoutPromise = new Promise((resolve) => setTimeout(() => resolve([]), 4000));
+      const results = await Promise.race([searchPromise, timeoutPromise]);
+      setRoomSearchResults((results || []).filter((s) => (s.duration || 210) <= 600).slice(0, 8));
     } catch (err) {
       console.error('Room search error:', err);
     } finally {
@@ -372,7 +435,7 @@ export default function RoomsView({
     }
   };
 
-  // 9. Chat send (Optimistic UI, persistent across polling)
+  // 9. Chat send (Optimistic UI, persistent across polling & 0ms cross-tab broadcast)
   const handleSendChat = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
     const msg = chatMsg.trim();
@@ -390,6 +453,13 @@ export default function RoomsView({
 
     setChats((prev) => [...prev, chatItem]);
     setChatMsg('');
+
+    // Cross-tab broadcast
+    try {
+      const ch = new BroadcastChannel('synctune_room_events_' + activeRoom);
+      ch.postMessage({ type: 'CHAT', chat: chatItem });
+      ch.close();
+    } catch (e) {}
 
     try {
       const res = await fetch('/api/room', {
@@ -428,6 +498,12 @@ export default function RoomsView({
     if (!activeRoom) return;
     const stableUser = getStableUser(user);
     triggerLocalReaction(emoji, stableUser.username);
+
+    try {
+      const ch = new BroadcastChannel('synctune_room_events_' + activeRoom);
+      ch.postMessage({ type: 'REACTION', emoji, senderName: stableUser.username });
+      ch.close();
+    } catch (e) {}
   };
 
   const handleUpvote = async (song) => {
@@ -438,6 +514,12 @@ export default function RoomsView({
       ...prev,
       [songId]: (prev[songId] || 0) + 1
     }));
+
+    try {
+      const ch = new BroadcastChannel('synctune_room_events_' + activeRoom);
+      ch.postMessage({ type: 'UPVOTE', songId });
+      ch.close();
+    } catch (e) {}
 
     try {
       await fetch('/api/room', {

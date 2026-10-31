@@ -50,7 +50,7 @@ function cleanText(str) {
 /**
  * Strict, verified matching against high-speed 320kbps Akamai MP4 stream.
  * 1. Strictly filters out instrumental, karaoke, lofi, ringtone, and cover versions.
- * 2. Enforces exact title word inclusion so wrong songs (e.g. Believer for Radioactive) are NEVER played.
+ * 2. Enforces exact title word inclusion so wrong songs are NEVER played.
  * 3. Enforces artist verification with robust YouTube channel name handling.
  */
 async function searchExactSaavn(rawTitle, rawArtist) {
@@ -81,7 +81,7 @@ async function searchExactSaavn(rawTitle, rawArtist) {
     .replace(/\b(vevo|records|music|official|channel|songs)\b/gi, '')
     .trim();
 
-  // If artist was inside the title (e.g. "Radioactive Imagine Dragons")
+  // If artist was inside the title
   if (normArtist && normTitle.includes(normArtist)) {
     normTitle = normTitle.replace(normArtist, '').trim();
   }
@@ -95,7 +95,7 @@ async function searchExactSaavn(rawTitle, rawArtist) {
   try {
     const url = `https://www.jiosaavn.com/api.php?__call=search.getResults&q=${encodeURIComponent(query)}&_format=json&_marker=0&ctx=web6dot0&api_version=4`;
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 3500);
+    const timeout = setTimeout(() => controller.abort(), 1200);
     const res = await fetch(url, {
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
       signal: controller.signal
@@ -104,7 +104,6 @@ async function searchExactSaavn(rawTitle, rawArtist) {
     if (!res.ok) return null;
     const data = await res.json();
     const results = data.results || [];
-    global._synctune_saavn_diag = { query, count: results.length, firstTitle: results[0]?.title };
 
     for (const item of results) {
       const itemTitle = cleanText(item.title);
@@ -140,9 +139,7 @@ async function searchExactSaavn(rawTitle, rawArtist) {
         }
       }
     }
-  } catch (e) {
-    global._synctune_saavn_diag = { query, error: e.message || String(e) };
-  }
+  } catch (e) {}
 
   return null;
 }
@@ -154,10 +151,14 @@ async function getAudioUrl(videoId) {
   }
 
   try {
-    const info = await yt.getInfo(videoId);
+    const fetchPromise = yt.getInfo(videoId);
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('YTDL timeout after 600ms')), 600)
+    );
+    const info = await Promise.race([fetchPromise, timeoutPromise]);
     const audioFormats = info.formats?.filter(f => f.hasAudio && !f.hasVideo) || [];
 
-    // Prefer itag 140 (audio/mp4 m4a 128kbps AAC - universal Apple iOS & Android background playback)
+    // Prefer itag 140 (audio/mp4 m4a 128kbps AAC)
     let selected = audioFormats.find(f => f.itag === 140);
     if (!selected) {
       selected = audioFormats.sort((a, b) => (b.audioBitrate || b.bitrate || 0) - (a.audioBitrate || a.bitrate || 0))[0];
@@ -167,10 +168,7 @@ async function getAudioUrl(videoId) {
       streamUrlCache.set(videoId, { url: selected.url, timestamp: Date.now() });
       return selected.url;
     }
-  } catch (err) {
-    console.error(`[Stream API] Error fetching stream for ${videoId}:`, err.message);
-    global._synctune_last_error = err.message || String(err);
-  }
+  } catch (err) {}
 
   return null;
 }
@@ -181,7 +179,7 @@ export async function HEAD(request) {
   const title = (searchParams.get('title') || '').trim();
   const artist = (searchParams.get('artist') || '').trim();
 
-  // 1. High-speed verified vocal CDN lookup (guaranteed exact song, no instrumentals)
+  // 1. High-speed verified vocal CDN lookup
   if (title) {
     const directMatch = await searchExactSaavn(title, artist);
     if (directMatch?.url) {
@@ -191,9 +189,7 @@ export async function HEAD(request) {
 
   if (!rawId) return new Response(null, { status: 400 });
 
-  // Strip extension hint if provided (e.g. videoId.m4a -> videoId)
   const videoId = rawId.replace(/\.(m4a|mp3|mp4|webm)$/i, '');
-
   const audioUrl = await getAudioUrl(videoId);
   if (!audioUrl) return new Response(null, { status: 502 });
 
@@ -227,7 +223,7 @@ export async function GET(request) {
   const title = (searchParams.get('title') || '').trim();
   const artist = (searchParams.get('artist') || '').trim();
 
-  // 1. High-speed verified vocal CDN lookup (Instant 320kbps Akamai MP4 stream, guaranteed vocal version)
+  // 1. High-speed verified vocal CDN lookup
   if (title) {
     const directMatch = await searchExactSaavn(title, artist);
     if (directMatch?.url) {
@@ -239,15 +235,11 @@ export async function GET(request) {
     return NextResponse.json({ error: 'Missing video id parameter' }, { status: 400 });
   }
 
-  // Strip extension hint if provided (e.g. videoId.m4a -> videoId)
   const videoId = rawId.replace(/\.(m4a|mp3|mp4|webm)$/i, '');
-
   let audioUrl = await getAudioUrl(videoId);
   if (!audioUrl) {
     return NextResponse.json({
-      error: 'Failed to extract audio stream',
-      lastError: global._synctune_last_error || 'unknown',
-      saavnDiag: global._synctune_saavn_diag || null
+      error: 'Failed to extract audio stream'
     }, { status: 502 });
   }
 
@@ -263,7 +255,6 @@ export async function GET(request) {
   try {
     let upstreamRes = await fetch(audioUrl, { headers: upstreamHeaders });
 
-    // If upstream returned 403 or error, retry once with fresh URL
     if (upstreamRes.status === 403 || (!upstreamRes.ok && upstreamRes.status !== 206)) {
       streamUrlCache.delete(videoId);
       audioUrl = await getAudioUrl(videoId);
@@ -291,13 +282,11 @@ export async function GET(request) {
     }
     responseHeaders.set('Cache-Control', 'public, max-age=3600');
 
-    // Pipe directly from server to client with zero IP mismatch
     return new Response(upstreamRes.body, {
       status: upstreamRes.status,
       headers: responseHeaders
     });
   } catch (err) {
-    console.error(`[Stream API] Proxy error:`, err);
     return NextResponse.json({ error: 'Stream proxy error' }, { status: 500 });
   }
 }

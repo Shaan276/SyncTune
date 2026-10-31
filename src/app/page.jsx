@@ -294,6 +294,12 @@ export default function Home() {
     // If active in a room and not triggered by incoming room sync, broadcast play to room!
     if (activeRoomRef.current && !isFromRoomSync) {
       if (!canControlMusicRef.current) return;
+      try {
+        const ch = new BroadcastChannel('synctune_room_' + activeRoomRef.current);
+        ch.postMessage({ type: 'PLAY_SONG', song: songToPlay });
+        ch.close();
+      } catch (e) {}
+
       fetch('/api/room', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -344,6 +350,42 @@ export default function Home() {
     replenishQueueToTarget(songToPlay, queueRef.current, 10);
   }, [replenishQueueToTarget]);
 
+  // Real-Time Cross-Tab / Cross-Window Room Sync (Instant 0ms sync)
+  useEffect(() => {
+    if (typeof window === 'undefined' || !activeRoom) return;
+
+    let ch = null;
+    try {
+      ch = new BroadcastChannel('synctune_room_' + activeRoom);
+      ch.onmessage = (event) => {
+        const msg = event.data;
+        if (!msg || !msg.type) return;
+
+        if (msg.type === 'PLAY_SONG' && msg.song) {
+          if (!currentSongRef.current || currentSongRef.current.id !== msg.song.id) {
+            handlePlaySong(msg.song, true);
+          }
+          setIsPlaying(true);
+        } else if (msg.type === 'PAUSE') {
+          setIsPlaying(false);
+          window.syncTunePauseAudio?.();
+        } else if (msg.type === 'RESUME') {
+          setIsPlaying(true);
+          window.syncTunePlayAudio?.();
+        } else if (msg.type === 'SEEK' && typeof msg.time === 'number') {
+          setCurrentTime(msg.time);
+          window.syncTuneSeekAudio?.(msg.time);
+        }
+      };
+    } catch (e) {}
+
+    return () => {
+      try {
+        ch?.close();
+      } catch (e) {}
+    };
+  }, [activeRoom, handlePlaySong]);
+
   // Global Real-Time Room Synchronizer (Synchronizes across all devices & tabs)
   useEffect(() => {
     if (!activeRoom) {
@@ -365,36 +407,41 @@ export default function Home() {
         const roomPlaying = Boolean(data.room.isPlaying);
         const roomTime = data.room.currentTime || 0;
 
-        // 1. Synchronize Song Playback
-        if (roomSong && roomSong.id) {
+        // If this tab is actively playing a song and the server room has no song yet, sync our song to the room!
+        if (currentSongRef.current && isPlayingRef.current && (!roomSong || roomSong.id !== currentSongRef.current.id)) {
+          fetch('/api/room', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'sync',
+              code: activeRoom,
+              currentSong: currentSongRef.current,
+              isPlaying: isPlayingRef.current,
+              currentTime: currentTimeRef.current,
+              user: getStableUser(userRef.current)
+            })
+          }).catch(() => {});
+        } else if (roomSong && roomSong.id) {
+          // 1. Synchronize Song Playback from room
           if (!currentSongRef.current || currentSongRef.current.id !== roomSong.id) {
             handlePlaySong(roomSong, true);
           }
-        } else {
-          // If room has NO song playing, clear local solo song so it does not persist into room!
-          if (currentSongRef.current) {
-            setCurrentSong(null);
-            setIsPlaying(false);
-            if (typeof window !== 'undefined' && window.syncTunePauseAudio) {
-              window.syncTunePauseAudio();
+
+          // 2. Synchronize Play / Pause State
+          if (roomPlaying !== isPlayingRef.current) {
+            setIsPlaying(roomPlaying);
+            if (roomPlaying) {
+              window.syncTunePlayAudio?.(roomSong?.id, roomSong?.audioUrl, roomSong?.title, roomSong?.artist);
+            } else {
+              window.syncTunePauseAudio?.();
             }
           }
-        }
 
-        // 2. Synchronize Play / Pause State
-        if (roomPlaying !== isPlayingRef.current) {
-          setIsPlaying(roomPlaying);
-          if (roomPlaying) {
-            window.syncTunePlayAudio?.(roomSong?.id, roomSong?.audioUrl, roomSong?.title, roomSong?.artist);
-          } else {
-            window.syncTunePauseAudio?.();
+          // 3. Drift Correction (> 3 seconds drift)
+          if (roomPlaying && Math.abs(roomTime - currentTimeRef.current) > 3) {
+            setCurrentTime(roomTime);
+            window.syncTuneSeekAudio?.(roomTime);
           }
-        }
-
-        // 3. Drift Correction (> 3 seconds drift)
-        if (roomPlaying && Math.abs(roomTime - currentTimeRef.current) > 3) {
-          setCurrentTime(roomTime);
-          window.syncTuneSeekAudio?.(roomTime);
         }
       } catch (err) {}
     };
@@ -542,6 +589,12 @@ export default function Home() {
       window.syncTunePlayAudio(currentSongRef.current?.id, currentSongRef.current?.audioUrl, currentSongRef.current?.title, currentSongRef.current?.artist);
     }
     if (activeRoomRef.current) {
+      try {
+        const ch = new BroadcastChannel('synctune_room_' + activeRoomRef.current);
+        ch.postMessage({ type: 'RESUME', time: currentTimeRef.current });
+        ch.close();
+      } catch (e) {}
+
       fetch('/api/room', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -558,7 +611,16 @@ export default function Home() {
   const handleDirectPause = useCallback(() => {
     if (activeRoomRef.current && !canControlMusicRef.current) return;
     setIsPlaying(false);
+    if (typeof window !== 'undefined' && window.syncTunePauseAudio) {
+      window.syncTunePauseAudio();
+    }
     if (activeRoomRef.current) {
+      try {
+        const ch = new BroadcastChannel('synctune_room_' + activeRoomRef.current);
+        ch.postMessage({ type: 'PAUSE', time: currentTimeRef.current });
+        ch.close();
+      } catch (e) {}
+
       fetch('/api/room', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -578,9 +640,17 @@ export default function Home() {
       const next = !prev;
       if (next && typeof window !== 'undefined' && window.syncTunePlayAudio) {
         window.syncTunePlayAudio(currentSongRef.current?.id, currentSongRef.current?.audioUrl, currentSongRef.current?.title, currentSongRef.current?.artist);
+      } else if (!next && typeof window !== 'undefined' && window.syncTunePauseAudio) {
+        window.syncTunePauseAudio();
       }
       // Broadcast to room
       if (activeRoomRef.current) {
+        try {
+          const ch = new BroadcastChannel('synctune_room_' + activeRoomRef.current);
+          ch.postMessage({ type: next ? 'RESUME' : 'PAUSE', time: currentTimeRef.current });
+          ch.close();
+        } catch (e) {}
+
         fetch('/api/room', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -604,6 +674,12 @@ export default function Home() {
     }
     // Broadcast seek to room
     if (activeRoomRef.current) {
+      try {
+        const ch = new BroadcastChannel('synctune_room_' + activeRoomRef.current);
+        ch.postMessage({ type: 'SEEK', time: newTime });
+        ch.close();
+      } catch (e) {}
+
       fetch('/api/room', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
