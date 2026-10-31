@@ -32,6 +32,10 @@ export default function YouTubeAudioEngine({
   const useIframeFallbackRef = useRef(false);
   useIframeFallbackRef.current = useIframeFallback;
 
+  const pendingSongIdRef = useRef(null);
+  const playWatchdogRef = useRef(null);
+  const nativeAudioStartedRef = useRef(false);
+
   const onEndedRef = useRef(onEnded);
   const onTimeUpdateRef = useRef(onTimeUpdate);
   const onPlayRef = useRef(onPlay);
@@ -112,11 +116,11 @@ export default function YouTubeAudioEngine({
     if (!songId) return;
     setUseIframeFallback(true);
     useIframeFallbackRef.current = true;
+    pendingSongIdRef.current = songId;
 
     if (audioRef.current) {
       try {
         audioRef.current.pause();
-        audioRef.current.removeAttribute('src');
       } catch (e) {}
     }
 
@@ -134,6 +138,7 @@ export default function YouTubeAudioEngine({
         } else {
           playerRef.current.cueVideoById(songId, 0);
         }
+        pendingSongIdRef.current = null;
       } catch (e) {
         console.warn('[SyncTune Audio] loadVideoById error:', e);
       }
@@ -362,9 +367,15 @@ export default function YouTubeAudioEngine({
               event.target.setPlaybackQuality('small');
               event.target.setVolume(Math.floor(volume * 100));
               event.target.unMute();
-              if (useIframeFallbackRef.current && isPlayingRef.current && currentSong?.id) {
-                event.target.loadVideoById(currentSong.id, 0);
-                event.target.playVideo();
+              const songToLoad = pendingSongIdRef.current || (useIframeFallbackRef.current && currentSong?.id);
+              if (songToLoad) {
+                if (isPlayingRef.current) {
+                  event.target.loadVideoById(songToLoad, 0);
+                  event.target.playVideo();
+                } else {
+                  event.target.cueVideoById(songToLoad, 0);
+                }
+                pendingSongIdRef.current = null;
               }
             } catch (e) {}
           },
@@ -399,21 +410,21 @@ export default function YouTubeAudioEngine({
   useEffect(() => {
     window.syncTunePlayAudio = (songId, directAudioUrl = null, title = '', artist = '') => {
       const isDirect = Boolean(directAudioUrl && typeof directAudioUrl === 'string' && directAudioUrl.startsWith('http'));
-      if (isDirect) {
-        setUseIframeFallback(false);
-        useIframeFallbackRef.current = false;
-        if (audioRef.current) {
-          if (songId && songId !== lastSongIdRef.current) {
-            lastSongIdRef.current = songId;
-            lastPlayTriggerRef.current = Date.now();
-            audioRef.current.src = directAudioUrl;
-          }
-          audioRef.current.volume = volume;
-          audioRef.current.play().catch(() => {});
+      if (useIframeFallbackRef.current && playerRef.current && isReadyRef.current) {
+        playerRef.current.playVideo();
+        return;
+      }
+      setUseIframeFallback(false);
+      useIframeFallbackRef.current = false;
+      if (audioRef.current) {
+        const targetSrc = isDirect
+          ? directAudioUrl
+          : (songId ? `/api/stream?id=${encodeURIComponent(songId)}&title=${encodeURIComponent(title || '')}&artist=${encodeURIComponent(artist || '')}` : null);
+        if (targetSrc) {
+          audioRef.current.src = targetSrc;
         }
-      } else {
-        // Direct zero-latency play via pre-warmed YouTube Engine
-        playWithYouTubeEngine(songId || currentSong?.id);
+        audioRef.current.volume = volume;
+        audioRef.current.play().catch(() => {});
       }
     };
 
@@ -473,7 +484,7 @@ export default function YouTubeAudioEngine({
     };
   }, [volume, currentSong?.audioUrl, currentSong?.title, currentSong?.artist]);
 
-  // 5. Track change handler: Instant zero-latency dispatch
+  // 5. Track change handler: Native audio first with automatic failover watchdog
   useEffect(() => {
     if (!currentSong?.id) return;
 
@@ -483,26 +494,39 @@ export default function YouTubeAudioEngine({
     if (isNewSong || isExplicitNewPlay) {
       lastSongIdRef.current = currentSong.id;
       lastPlayTriggerRef.current = currentSong.playTrigger || Date.now();
+      nativeAudioStartedRef.current = false;
+      if (playWatchdogRef.current) {
+        clearTimeout(playWatchdogRef.current);
+        playWatchdogRef.current = null;
+      }
 
-      const hasDirectAudio = Boolean(currentSong.audioUrl && typeof currentSong.audioUrl === 'string' && currentSong.audioUrl.startsWith('http'));
+      setUseIframeFallback(false);
+      useIframeFallbackRef.current = false;
 
-      if (hasDirectAudio) {
-        // High-speed Akamai 320kbps MP4 CDN (plays in 100ms)
-        setUseIframeFallback(false);
-        useIframeFallbackRef.current = false;
-        if (playerRef.current && isReadyRef.current) {
-          try { playerRef.current.pauseVideo(); } catch (e) {}
+      if (playerRef.current && isReadyRef.current) {
+        try { playerRef.current.pauseVideo(); } catch (e) {}
+      }
+
+      if (audioRef.current) {
+        const targetSrc = (currentSong.audioUrl && typeof currentSong.audioUrl === 'string' && currentSong.audioUrl.startsWith('http'))
+          ? currentSong.audioUrl
+          : `/api/stream?id=${encodeURIComponent(currentSong.id)}&title=${encodeURIComponent(currentSong.title || '')}&artist=${encodeURIComponent(currentSong.artist || '')}`;
+
+        audioRef.current.src = targetSrc;
+        audioRef.current.volume = volume;
+        if (isPlaying) {
+          audioRef.current.play().catch((err) => {
+            console.warn('[SyncTune Audio] Direct play deferred:', err);
+          });
+
+          // 4s watchdog: failover to YouTube iframe if native audio does not start
+          playWatchdogRef.current = setTimeout(() => {
+            if (!nativeAudioStartedRef.current && isPlayingRef.current && !useIframeFallbackRef.current) {
+              console.warn('[SyncTune Audio] Failover to YouTube iframe after 4s timeout');
+              playWithYouTubeEngine(currentSong.id);
+            }
+          }, 4000);
         }
-        if (audioRef.current) {
-          audioRef.current.src = currentSong.audioUrl;
-          audioRef.current.volume = volume;
-          if (isPlaying) {
-            audioRef.current.play().catch(() => {});
-          }
-        }
-      } else {
-        // YouTube track without direct URL: Instant switch to pre-warmed YouTube Engine (plays in ~150ms instead of 5s)
-        playWithYouTubeEngine(currentSong.id);
       }
     }
   }, [currentSong?.id, currentSong?.audioUrl, currentSong?.title, currentSong?.artist, currentSong?.playTrigger, volume]);
@@ -548,10 +572,28 @@ export default function YouTubeAudioEngine({
         ref={audioRef}
         playsInline
         preload="auto"
+        onPlaying={() => {
+          nativeAudioStartedRef.current = true;
+          if (playWatchdogRef.current) {
+            clearTimeout(playWatchdogRef.current);
+            playWatchdogRef.current = null;
+          }
+          if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
+            navigator.mediaSession.playbackState = 'playing';
+            updatePositionState();
+          }
+        }}
         onTimeUpdate={(e) => {
           if (!useIframeFallback && onTimeUpdateRef.current) {
             const t = e.currentTarget.currentTime;
             if (!isNaN(t)) {
+              if (!nativeAudioStartedRef.current && t > 0) {
+                nativeAudioStartedRef.current = true;
+                if (playWatchdogRef.current) {
+                  clearTimeout(playWatchdogRef.current);
+                  playWatchdogRef.current = null;
+                }
+              }
               onTimeUpdateRef.current(t);
               if (isPlayingRef.current) {
                 updatePositionState(t);
@@ -575,8 +617,14 @@ export default function YouTubeAudioEngine({
             onEndedRef.current();
           }
         }}
-        onError={() => {
-          if (!currentSong?.id) return;
+        onError={(e) => {
+          if (playWatchdogRef.current) {
+            clearTimeout(playWatchdogRef.current);
+            playWatchdogRef.current = null;
+          }
+          const src = audioRef.current?.getAttribute('src');
+          if (!src || !currentSong?.id) return;
+          console.warn('[SyncTune Native Audio] Stream error event, switching to fallback:', e);
           playWithYouTubeEngine(currentSong.id);
         }}
         style={{
@@ -607,13 +655,11 @@ export default function YouTubeAudioEngine({
           position: 'fixed',
           bottom: 0,
           right: 0,
-          width: '320px',
-          height: '240px',
-          transform: 'scale(0.001)',
-          transformOrigin: 'bottom right',
+          width: '20px',
+          height: '20px',
           pointerEvents: 'none',
-          zIndex: 1,
-          opacity: useIframeFallback ? 0.01 : 0
+          zIndex: -1,
+          opacity: useIframeFallback ? 0.5 : 0.001
         }}
       >
         <div id="synctune-ultra-low-audio-engine" />

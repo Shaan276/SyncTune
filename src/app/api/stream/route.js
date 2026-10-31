@@ -95,7 +95,7 @@ async function searchExactSaavn(rawTitle, rawArtist) {
   try {
     const url = `https://www.jiosaavn.com/api.php?__call=search.getResults&q=${encodeURIComponent(query)}&_format=json&_marker=0&ctx=web6dot0&api_version=4`;
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 1200);
+    const timeout = setTimeout(() => controller.abort(), 3500);
     const res = await fetch(url, {
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
       signal: controller.signal
@@ -103,7 +103,25 @@ async function searchExactSaavn(rawTitle, rawArtist) {
     clearTimeout(timeout);
     if (!res.ok) return null;
     const data = await res.json();
-    const results = data.results || [];
+    let results = data.results || [];
+
+    // Fallback query if no results with combined artist
+    if (results.length === 0 && normTitle.length > 3) {
+      try {
+        const fbUrl = `https://www.jiosaavn.com/api.php?__call=search.getResults&q=${encodeURIComponent(normTitle)}&_format=json&_marker=0&ctx=web6dot0&api_version=4`;
+        const fbController = new AbortController();
+        const fbTimeout = setTimeout(() => fbController.abort(), 2000);
+        const fbRes = await fetch(fbUrl, {
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+          signal: fbController.signal
+        });
+        clearTimeout(fbTimeout);
+        if (fbRes.ok) {
+          const fbData = await fbRes.json();
+          results = fbData.results || [];
+        }
+      } catch (e) {}
+    }
 
     for (const item of results) {
       const itemTitle = cleanText(item.title);
@@ -153,7 +171,7 @@ async function getAudioUrl(videoId) {
   try {
     const fetchPromise = yt.getInfo(videoId);
     const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('YTDL timeout after 600ms')), 600)
+      setTimeout(() => reject(new Error('YTDL stream fetch timed out')), 3500)
     );
     const info = await Promise.race([fetchPromise, timeoutPromise]);
     const audioFormats = info.formats?.filter(f => f.hasAudio && !f.hasVideo) || [];
