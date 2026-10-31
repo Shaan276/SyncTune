@@ -125,129 +125,132 @@ export default function YouTubeAudioEngine({
     }
   }, [isPlaying, useIframeFallback, volume]);
 
+  // Helper: Synchronize MediaSession position state strictly per W3C spec (playbackRate must be > 0)
+  const updatePositionState = (explicitPos) => {
+    if (typeof window === 'undefined' || !('mediaSession' in navigator) || !('setPositionState' in navigator.mediaSession)) return;
+    if (!isPlayingRef.current) return; // W3C Spec: setPositionState must NEVER be called with playbackRate <= 0
+    const d = audioRef.current?.duration || duration;
+    if (!d || isNaN(d) || d <= 0) return;
+    const pos = explicitPos !== undefined ? explicitPos : (audioRef.current?.currentTime || currentTime);
+    if (isNaN(pos) || pos < 0 || pos > d) return;
+
+    try {
+      navigator.mediaSession.setPositionState({
+        duration: Math.max(1, d),
+        playbackRate: 1.0,
+        position: pos
+      });
+    } catch (err) {}
+  };
+
   // 3. MediaSession API metadata & action handlers (Persistent notification while paused)
   useEffect(() => {
     if (typeof window === 'undefined' || !('mediaSession' in navigator)) return;
+    if (!currentSong) return;
 
-    if (currentSong) {
-      try {
-        const artworkUrl = currentSong.thumbnail || `https://img.youtube.com/vi/${currentSong.id}/hqdefault.jpg`;
-        
-        // Only allocate metadata when track identity changes, preventing Android/iOS notification dismissal on pause
-        navigator.mediaSession.metadata = new window.MediaMetadata({
-          title: currentSong.title || 'SyncTune Track',
-          artist: currentSong.artist || 'SyncTune Artist',
-          album: 'SyncTune Audio OS',
-          artwork: [
-            { src: artworkUrl, sizes: '96x96', type: 'image/jpeg' },
-            { src: artworkUrl, sizes: '256x256', type: 'image/jpeg' },
-            { src: artworkUrl, sizes: '512x512', type: 'image/jpeg' }
-          ]
-        });
+    try {
+      const artworkUrl = currentSong.thumbnail || `https://img.youtube.com/vi/${currentSong.id}/hqdefault.jpg`;
+      
+      // Allocate metadata once per track. Never reset or wipe on pause.
+      navigator.mediaSession.metadata = new window.MediaMetadata({
+        title: currentSong.title || 'SyncTune Track',
+        artist: currentSong.artist || 'SyncTune Artist',
+        album: 'SyncTune Audio OS',
+        artwork: [
+          { src: artworkUrl, sizes: '96x96', type: 'image/jpeg' },
+          { src: artworkUrl, sizes: '256x256', type: 'image/jpeg' },
+          { src: artworkUrl, sizes: '512x512', type: 'image/jpeg' }
+        ]
+      });
 
-        navigator.mediaSession.playbackState = isPlayingRef.current ? 'playing' : 'paused';
+      navigator.mediaSession.playbackState = isPlayingRef.current ? 'playing' : 'paused';
 
-        navigator.mediaSession.setActionHandler('play', () => {
-          if (audioRef.current && !useIframeFallbackRef.current) {
-            audioRef.current.play().catch(() => {});
-          }
-          if (useIframeFallbackRef.current && playerRef.current && isReadyRef.current) {
-            try {
-              playerRef.current.unMute();
-              playerRef.current.setVolume(Math.floor(volume * 100));
-              playerRef.current.playVideo();
-            } catch (e) {}
-          }
-          if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
-            navigator.mediaSession.playbackState = 'playing';
-            if ('setPositionState' in navigator.mediaSession && duration > 0) {
-              try {
-                navigator.mediaSession.setPositionState({
-                  duration: Math.max(1, duration),
-                  playbackRate: 1,
-                  position: Math.min(audioRef.current?.currentTime || currentTime, duration)
-                });
-              } catch (e) {}
-            }
-          }
-          if (onPlayRef.current) {
-            onPlayRef.current();
-          } else if (onTogglePlayRef.current) {
-            onTogglePlayRef.current();
-          }
-        });
+      navigator.mediaSession.setActionHandler('play', () => {
+        if (audioRef.current && !useIframeFallbackRef.current) {
+          audioRef.current.play().catch(() => {});
+        }
+        if (useIframeFallbackRef.current && playerRef.current && isReadyRef.current) {
+          try {
+            playerRef.current.unMute();
+            playerRef.current.setVolume(Math.floor(volume * 100));
+            playerRef.current.playVideo();
+          } catch (e) {}
+        }
+        if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
+          navigator.mediaSession.playbackState = 'playing';
+          updatePositionState();
+        }
+        if (onPlayRef.current) {
+          onPlayRef.current();
+        } else if (onTogglePlayRef.current) {
+          onTogglePlayRef.current();
+        }
+      });
 
-        navigator.mediaSession.setActionHandler('pause', () => {
+      navigator.mediaSession.setActionHandler('pause', () => {
+        if (audioRef.current) {
+          audioRef.current.pause();
+        }
+        if (playerRef.current && isReadyRef.current) {
+          try {
+            playerRef.current.pauseVideo();
+          } catch (e) {}
+        }
+        if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
+          // W3C compliant: set playbackState to 'paused' without calling setPositionState(rate: 0)
+          // This keeps the iOS Lock Screen & Android notification active with the Play button visible
+          navigator.mediaSession.playbackState = 'paused';
+        }
+        if (onPauseRef.current) {
+          onPauseRef.current();
+        } else if (onTogglePlayRef.current) {
+          onTogglePlayRef.current();
+        }
+      });
+
+      navigator.mediaSession.setActionHandler('previoustrack', () => {
+        if (onSkipPrevRef.current) onSkipPrevRef.current();
+      });
+      navigator.mediaSession.setActionHandler('nexttrack', () => {
+        if (onSkipNextRef.current) onSkipNextRef.current();
+      });
+      navigator.mediaSession.setActionHandler('seekto', (details) => {
+        if (details.seekTime !== undefined) {
           if (audioRef.current) {
-            audioRef.current.pause();
+            audioRef.current.currentTime = details.seekTime;
           }
-          if (playerRef.current && isReadyRef.current) {
-            try {
-              playerRef.current.pauseVideo();
-            } catch (e) {}
-          }
-          if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
-            // Explicitly set state to paused without destroying metadata so notification stays pinned
-            navigator.mediaSession.playbackState = 'paused';
-            if ('setPositionState' in navigator.mediaSession && duration > 0) {
-              try {
-                navigator.mediaSession.setPositionState({
-                  duration: Math.max(1, duration),
-                  playbackRate: 0,
-                  position: Math.min(audioRef.current?.currentTime || currentTime, duration)
-                });
-              } catch (e) {}
-            }
-          }
-          if (onPauseRef.current) {
-            onPauseRef.current();
-          } else if (onTogglePlayRef.current) {
-            onTogglePlayRef.current();
-          }
-        });
+          if (onSeekRef.current) onSeekRef.current(details.seekTime);
+          if (window.syncTuneSeekAudio) window.syncTuneSeekAudio(details.seekTime);
+          updatePositionState(details.seekTime);
+        }
+      });
+      navigator.mediaSession.setActionHandler('seekforward', (details) => {
+        const skipTime = details.seekOffset || 10;
+        const current = audioRef.current?.currentTime || currentTime || 0;
+        const target = Math.min(duration || 1000, current + skipTime);
+        if (window.syncTuneSeekAudio) window.syncTuneSeekAudio(target);
+        updatePositionState(target);
+      });
+      navigator.mediaSession.setActionHandler('seekbackward', (details) => {
+        const skipTime = details.seekOffset || 10;
+        const current = audioRef.current?.currentTime || currentTime || 0;
+        const target = Math.max(0, current - skipTime);
+        if (window.syncTuneSeekAudio) window.syncTuneSeekAudio(target);
+        updatePositionState(target);
+      });
+    } catch (err) {}
+  }, [currentSong?.id, currentSong?.title, currentSong?.artist, currentSong?.thumbnail]);
 
-        navigator.mediaSession.setActionHandler('previoustrack', () => {
-          if (onSkipPrevRef.current) onSkipPrevRef.current();
-        });
-        navigator.mediaSession.setActionHandler('nexttrack', () => {
-          if (onSkipNextRef.current) onSkipNextRef.current();
-        });
-        navigator.mediaSession.setActionHandler('seekto', (details) => {
-          if (details.seekTime !== undefined) {
-            if (onSeekRef.current) onSeekRef.current(details.seekTime);
-            if (window.syncTuneSeekAudio) window.syncTuneSeekAudio(details.seekTime);
-          }
-        });
-        navigator.mediaSession.setActionHandler('seekforward', (details) => {
-          const skipTime = details.seekOffset || 10;
-          const current = audioRef.current?.currentTime || currentTime || 0;
-          const target = Math.min(duration || 1000, current + skipTime);
-          if (window.syncTuneSeekAudio) window.syncTuneSeekAudio(target);
-        });
-        navigator.mediaSession.setActionHandler('seekbackward', (details) => {
-          const skipTime = details.seekOffset || 10;
-          const current = audioRef.current?.currentTime || currentTime || 0;
-          const target = Math.max(0, current - skipTime);
-          if (window.syncTuneSeekAudio) window.syncTuneSeekAudio(target);
-        });
-      } catch (err) {}
-    }
-  }, [currentSong?.id, currentSong?.title, currentSong?.artist, currentSong?.thumbnail, duration]);
-
-  // Synchronize MediaSession playbackState and position without touching metadata
+  // Synchronize MediaSession playbackState and position without touching metadata or violating W3C spec
   useEffect(() => {
     if (typeof window === 'undefined' || !('mediaSession' in navigator)) return;
     try {
       navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
-      if ('setPositionState' in navigator.mediaSession && duration > 0) {
-        navigator.mediaSession.setPositionState({
-          duration: Math.max(1, duration),
-          playbackRate: isPlaying ? 1 : 0,
-          position: Math.min(currentTime, duration)
-        });
+      if (isPlaying) {
+        updatePositionState(currentTime);
       }
     } catch (e) {}
-  }, [isPlaying, duration, currentTime]);
+  }, [isPlaying, duration]);
 
   // 4. Initialize YouTube IFrame API ONLY IF fallback is required
   useEffect(() => {
@@ -456,19 +459,8 @@ export default function YouTubeAudioEngine({
             const t = e.currentTarget.currentTime;
             if (!isNaN(t)) {
               onTimeUpdateRef.current(t);
-              if (
-                typeof navigator !== 'undefined' &&
-                'mediaSession' in navigator &&
-                'setPositionState' in navigator.mediaSession &&
-                duration > 0
-              ) {
-                try {
-                  navigator.mediaSession.setPositionState({
-                    duration: Math.max(1, duration),
-                    playbackRate: isPlayingRef.current ? 1 : 0,
-                    position: Math.min(t, duration)
-                  });
-                } catch (err) {}
+              if (isPlayingRef.current) {
+                updatePositionState(t);
               }
             }
           }
@@ -476,6 +468,7 @@ export default function YouTubeAudioEngine({
         onPlay={() => {
           if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
             navigator.mediaSession.playbackState = 'playing';
+            updatePositionState();
           }
         }}
         onPause={() => {
