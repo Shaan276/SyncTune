@@ -102,6 +102,7 @@ async function searchExactSaavn(rawTitle, rawArtist) {
     if (!res.ok) return null;
     const data = await res.json();
     const results = data.results || [];
+    global._synctune_saavn_diag = { query, count: results.length, firstTitle: results[0]?.title };
 
     for (const item of results) {
       const itemTitle = cleanText(item.title);
@@ -137,7 +138,9 @@ async function searchExactSaavn(rawTitle, rawArtist) {
         }
       }
     }
-  } catch (e) {}
+  } catch (e) {
+    global._synctune_saavn_diag = { query, error: e.message || String(e) };
+  }
 
   return null;
 }
@@ -239,7 +242,11 @@ export async function GET(request) {
 
   let audioUrl = await getAudioUrl(videoId);
   if (!audioUrl) {
-    return NextResponse.json({ error: 'Failed to extract audio stream', lastError: global._synctune_last_error || 'unknown' }, { status: 502 });
+    return NextResponse.json({
+      error: 'Failed to extract audio stream',
+      lastError: global._synctune_last_error || 'unknown',
+      saavnDiag: global._synctune_saavn_diag || null
+    }, { status: 502 });
   }
 
   const rangeHeader = request.headers.get('range');
