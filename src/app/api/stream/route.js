@@ -66,10 +66,12 @@ async function searchExactSaavn(rawTitle, rawArtist) {
     }
   }
 
-  // Clean title: remove parentheticals, lyrics, official video, etc.
-  let normTitle = cleanText(title)
+  // Clean title BEFORE cleanText so parentheticals (Lyric Video), [Official Audio] are stripped
+  let cleanRawTitle = (title || '')
     .replace(/\(.*?\)/g, '')
-    .replace(/\[.*?\]/g, '')
+    .replace(/\[.*?\]/g, '');
+
+  let normTitle = cleanText(cleanRawTitle)
     .replace(/\b(official|video|audio|lyrics?|hd|4k|remastered|full song|visualizer|music video|lyric video)\b/gi, '')
     .trim();
 
