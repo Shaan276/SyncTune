@@ -1,11 +1,13 @@
 import { NextResponse } from 'next/server';
-import { Ytdl } from '@distube/ytdl-core';
+import { Ytdl, Client } from '@distube/ytdl-core';
 import CryptoJS from 'crypto-js';
 
 export const dynamic = 'force-dynamic';
 
 if (!global._synctune_ytdl_instance) {
-  global._synctune_ytdl_instance = new Ytdl();
+  global._synctune_ytdl_instance = new Ytdl({
+    clients: [Client.WebEmbedded, Client.Tv, Client.Mweb, Client.VisionOS]
+  });
 }
 const yt = global._synctune_ytdl_instance;
 

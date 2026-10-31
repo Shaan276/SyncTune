@@ -1,6 +1,9 @@
 'use client';
 import React, { useEffect, useRef, useState } from 'react';
 
+// 44-byte silent WAV data URI to keep mobile OS audio session active during background playback
+const SILENT_AUDIO_URI = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+
 export default function YouTubeAudioEngine({
   currentSong,
   isPlaying,
@@ -17,6 +20,7 @@ export default function YouTubeAudioEngine({
   onSeek
 }) {
   const audioRef = useRef(null);
+  const silentAudioRef = useRef(null);
   const playerRef = useRef(null);
   const isReadyRef = useRef(false);
   const lastSongIdRef = useRef(null);
@@ -73,10 +77,14 @@ export default function YouTubeAudioEngine({
         } catch (e) {}
       }
 
-      // Unlock Native HTML5 Audio
+      // Unlock Native HTML5 Audio & Silent Carrier Loop
       const audio = audioRef.current;
       if (audio && isPlayingRef.current) {
         audio.play().catch(() => {});
+      }
+      const silent = silentAudioRef.current;
+      if (silent) {
+        silent.play().catch(() => {});
       }
 
       // Unlock YouTube iframe fallback if active
@@ -110,6 +118,15 @@ export default function YouTubeAudioEngine({
         audio.play().catch(() => {});
       } else {
         audio.pause();
+      }
+    }
+
+    const silent = silentAudioRef.current;
+    if (silent) {
+      if (isPlaying) {
+        silent.play().catch(() => {});
+      } else {
+        silent.pause();
       }
     }
 
@@ -369,6 +386,9 @@ export default function YouTubeAudioEngine({
             audioRef.current.play().catch(() => {});
           }
           if (useIframeFallbackRef.current && playerRef.current) {
+            if (silentAudioRef.current && silentAudioRef.current.paused) {
+              silentAudioRef.current.play().catch(() => {});
+            }
             playerRef.current.unMute();
             playerRef.current.setVolume(Math.floor(volume * 100));
             playerRef.current.playVideo();
@@ -507,6 +527,16 @@ export default function YouTubeAudioEngine({
           pointerEvents: 'none',
           zIndex: -1
         }}
+      />
+
+      {/* Real HTML5 audio carrier element unlocked by user interaction to keep mobile OS audio session alive */}
+      <audio
+        ref={silentAudioRef}
+        src={SILENT_AUDIO_URI}
+        loop
+        playsInline
+        preload="auto"
+        style={{ display: 'none' }}
       />
 
       {/* Backup YouTube Iframe Engine container (only rendered if fallback is actively triggered) */}
