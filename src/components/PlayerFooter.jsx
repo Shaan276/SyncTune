@@ -154,22 +154,6 @@ export default function PlayerFooter({
             >
               <SkipForward className="w-4 h-4" />
             </button>
-
-            {/* Desktop Queue Button */}
-            {onToggleQueue && (
-              <button
-                onClick={onToggleQueue}
-                className={`p-2 px-2.5 rounded-xl border transition-all flex items-center gap-1.5 text-[11px] font-bold cursor-pointer shrink-0 ${
-                  isQueueOpen
-                    ? 'bg-emerald-500 text-black border-emerald-400 shadow-md shadow-emerald-500/20'
-                    : 'bg-[#141C30] text-zinc-300 border-white/5 hover:bg-[#1a2540]'
-                }`}
-                title="Toggle Playback Queue"
-              >
-                <ListMusic className="w-3.5 h-3.5" />
-                <span>Queue {queue.length > 0 ? `(${queue.length})` : ''}</span>
-              </button>
-            )}
           </div>
 
           {/* Desktop Time Indicators */}
@@ -238,26 +222,6 @@ export default function PlayerFooter({
           >
             <SkipForward className="w-4 h-4" />
           </button>
-
-          {/* Mobile Queue Button */}
-          {onToggleQueue && (
-            <button
-              onClick={onToggleQueue}
-              className={`p-1.5 px-2 rounded-xl border transition-all flex items-center justify-center cursor-pointer ${
-                isQueueOpen
-                  ? 'bg-emerald-500 text-black border-emerald-400'
-                  : 'bg-[#141C30] text-zinc-300 border-white/10'
-              }`}
-              title="Queue"
-            >
-              <ListMusic className="w-4 h-4" />
-              {queue.length > 0 && (
-                <span className="ml-1 text-[10px] font-mono font-bold text-emerald-400">
-                  {queue.length}
-                </span>
-              )}
-            </button>
-          )}
         </div>
       </div>
     </footer>

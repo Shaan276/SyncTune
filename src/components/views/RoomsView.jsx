@@ -125,6 +125,7 @@ export default function RoomsView({
 
   const roomSearchInputRef = useRef(null);
   const chatBottomRef = useRef(null);
+  const chatContainerRef = useRef(null);
   const activeRoomRef = useRef(activeRoom);
   activeRoomRef.current = activeRoom;
 
@@ -137,10 +138,12 @@ export default function RoomsView({
   const isHost = activeRoom && (String(roomHostId) === String(currentUser.id) || members.some((m) => String(m.id) === String(currentUser.id) && m.isHost));
   const canControlMusic = !activeRoom || roomAllowListenerControl || isHost;
 
-  // Auto-scroll chat to latest message
+  // Auto-scroll chat to latest message (scoped to chat container only, never scrolls the outer room page)
   useEffect(() => {
-    chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [chats]);
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+    }
+  }, [chats.length]);
 
   // Real-Time Cross-Window / Cross-Tab Room Events (Chats, Reactions, Upvotes, Queue)
   useEffect(() => {
@@ -205,6 +208,9 @@ export default function RoomsView({
           }
 
           if (data.queueVotes) setQueueVotes(data.queueVotes);
+          if (data.queue && Array.isArray(data.queue) && data.queue.length > 0) {
+            setRoomRecommendations(data.queue);
+          }
 
           // If a song is actively playing in the room and differs from local
           if (data.currentSong && data.currentSong.id && (!currentSong || currentSong.id !== data.currentSong.id)) {
@@ -383,15 +389,29 @@ export default function RoomsView({
     }
   };
 
-  // 6. Add searched song to room queue
-  const handleAddToRoomQueue = (song) => {
+  // 6. Add searched song to room queue (synced to server and BroadcastChannel)
+  const handleAddToRoomQueue = async (song) => {
     if (!song || !song.id) return;
     setRoomRecommendations((prev) => {
       const exists = prev.some((s) => s.id === song.id);
       if (exists) return prev;
-      return [song, ...prev];
+      return [...prev, song];
     });
     setRoomSearchResults([]);
+
+    if (activeRoom) {
+      try {
+        await fetch('/api/room', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'add_queue',
+            code: activeRoom,
+            song
+          })
+        });
+      } catch (e) {}
+    }
 
     try {
       const ch = new BroadcastChannel('synctune_room_events_' + activeRoom);
@@ -932,7 +952,7 @@ export default function RoomsView({
                   <span className="text-[10px] text-zinc-400">{chats.length} messages</span>
                 </div>
 
-                <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-2 pr-1">
+                <div ref={chatContainerRef} className="flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-2 pr-1">
                   {chats.length === 0 ? (
                     <div className="h-full flex items-center justify-center text-xs text-zinc-500 italic">
                       No messages yet. Say hello to everyone!

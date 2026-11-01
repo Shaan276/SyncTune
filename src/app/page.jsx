@@ -414,21 +414,7 @@ export default function Home() {
         const roomPlaying = Boolean(data.room.isPlaying);
         const roomTime = data.room.currentTime || 0;
 
-        // If this tab is actively playing a song and the server room has no song yet, sync our song to the room!
-        if (currentSongRef.current && isPlayingRef.current && (!roomSong || roomSong.id !== currentSongRef.current.id)) {
-          fetch('/api/room', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              action: 'sync',
-              code: activeRoom,
-              currentSong: currentSongRef.current,
-              isPlaying: isPlayingRef.current,
-              currentTime: currentTimeRef.current,
-              user: getStableUser(userRef.current)
-            })
-          }).catch(() => {});
-        } else if (roomSong && roomSong.id) {
+        if (roomSong && roomSong.id) {
           // 1. Synchronize Song Playback from room
           if (!currentSongRef.current || currentSongRef.current.id !== roomSong.id) {
             handlePlaySong(roomSong, true);
@@ -444,8 +430,9 @@ export default function Home() {
             }
           }
 
-          // 3. Drift Correction (> 3 seconds drift)
-          if (roomPlaying && Math.abs(roomTime - currentTimeRef.current) > 3) {
+          // 3. Drift Correction: Only while safely inside track playback (never near the end to avoid loop glitches!)
+          const trackDur = roomSong.duration || 180;
+          if (roomPlaying && roomTime > 1 && roomTime < trackDur - 3 && Math.abs(roomTime - currentTimeRef.current) > 3) {
             setCurrentTime(roomTime);
             window.syncTuneSeekAudio?.(roomTime);
           }
@@ -462,10 +449,31 @@ export default function Home() {
     };
   }, [activeRoom, handlePlaySong]);
 
-  // Rolling Queue Skip Next: Pop 1, Play 1, Fetch 1 new vibe track to maintain 10 songs!
-  const handleSkipNext = useCallback(() => {
-    if (activeRoomRef.current && !canControlMusicRef.current) return;
-    // 1. Loop Check: If loop song is ON, repeat the track
+  // Skip Next: In a room, advances the room queue; in solo, rolls local vibe queue
+  const handleSkipNext = useCallback(async () => {
+    if (activeRoomRef.current) {
+      if (!canControlMusicRef.current) return;
+      try {
+        const res = await fetch('/api/room', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'next',
+            code: activeRoomRef.current,
+            user: getStableUser(userRef.current)
+          })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.currentSong) {
+            handlePlaySong(data.currentSong, true);
+            return;
+          }
+        }
+      } catch (e) {}
+    }
+
+    // 1. Loop Check: If loop song is ON in solo mode, repeat the track
     if (isLoopingRef.current && currentSongRef.current) {
       setCurrentTime(0);
       if (typeof window !== 'undefined' && window.syncTuneSeekAudio) {
@@ -897,7 +905,13 @@ export default function Home() {
         volume={volume}
         currentTime={currentTime}
         duration={duration}
-        onTimeUpdate={(time) => setCurrentTime(Math.floor(time))}
+        onTimeUpdate={(time) => {
+          const currentT = Math.floor(time);
+          setCurrentTime(currentT);
+          if (duration > 0 && currentT >= duration + 1) {
+            handleSkipNext();
+          }
+        }}
         onEnded={handleSkipNext}
         onPlay={handleDirectPlay}
         onPause={handleDirectPause}
