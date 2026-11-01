@@ -35,6 +35,7 @@ export default function YouTubeAudioEngine({
   useIframeFallbackRef.current = useIframeFallback;
 
   const pendingSongIdRef = useRef(null);
+  const pendingSeekTimeRef = useRef(0);
   const playWatchdogRef = useRef(null);
   const nativeAudioStartedRef = useRef(false);
 
@@ -100,6 +101,8 @@ export default function YouTubeAudioEngine({
       }
     };
 
+    window.syncTuneUnlockAudio = unlockAudioSession;
+
     window.addEventListener('touchstart', unlockAudioSession, { passive: true });
     window.addEventListener('touchend', unlockAudioSession, { passive: true });
     window.addEventListener('click', unlockAudioSession, { passive: true });
@@ -113,10 +116,15 @@ export default function YouTubeAudioEngine({
     };
   }, [volume]);
 
-  // Helper: Initialize or recreate YouTube player with a VALID video ID
-  const initPlayer = (songId) => {
+  // Helper: Initialize or recreate YouTube player with a VALID video ID and start timestamp
+  const initPlayer = (songId, startSeconds = 0) => {
     const targetId = songId || pendingSongIdRef.current || currentSongRef.current?.id;
     if (!targetId || typeof window === 'undefined') return;
+
+    const initialSeek = typeof startSeconds === 'number' && startSeconds > 0 ? startSeconds : (pendingSeekTimeRef.current || 0);
+    if (initialSeek > 0) {
+      pendingSeekTimeRef.current = initialSeek;
+    }
 
     if (!window.YT || !window.YT.Player) {
       pendingSongIdRef.current = targetId;
@@ -159,6 +167,7 @@ export default function YouTubeAudioEngine({
           showinfo: 0,
           modestbranding: 1,
           playsinline: 1,
+          start: Math.floor(initialSeek || 0),
           suggestedQuality: 'small',
           origin: typeof window !== 'undefined' ? window.location.origin : ''
         },
@@ -177,15 +186,25 @@ export default function YouTubeAudioEngine({
               event.target.setPlaybackQuality('small');
               event.target.setVolume(Math.floor(volume * 100));
               event.target.unMute();
+
               const latestSongId = pendingSongIdRef.current || currentSongRef.current?.id;
+              const targetSeek = pendingSeekTimeRef.current || initialSeek || 0;
+
               if (latestSongId && latestSongId !== targetId) {
-                event.target.loadVideoById(latestSongId, 0);
+                event.target.loadVideoById({
+                  videoId: latestSongId,
+                  startSeconds: targetSeek
+                });
+              } else if (targetSeek > 0) {
+                event.target.seekTo(targetSeek, true);
               }
+
               if (isPlayingRef.current) {
                 event.target.unMute();
                 event.target.playVideo();
               }
               pendingSongIdRef.current = null;
+              pendingSeekTimeRef.current = 0;
             } catch (e) {}
           },
           onError: (event) => {
@@ -232,12 +251,17 @@ export default function YouTubeAudioEngine({
     }
   };
 
-  // Helper: Switch immediately to pre-warmed YouTube Engine
-  const playWithYouTubeEngine = (songId) => {
+  // Helper: Switch immediately to pre-warmed YouTube Engine with timestamp support
+  const playWithYouTubeEngine = (songId, startSeconds = 0) => {
     if (!songId) return;
     setUseIframeFallback(true);
     useIframeFallbackRef.current = true;
     pendingSongIdRef.current = songId;
+
+    const initialSeek = typeof startSeconds === 'number' && startSeconds > 0 ? startSeconds : (pendingSeekTimeRef.current || 0);
+    if (initialSeek > 0) {
+      pendingSeekTimeRef.current = initialSeek;
+    }
 
     if (audioRef.current) {
       try {
@@ -251,21 +275,28 @@ export default function YouTubeAudioEngine({
 
     if (playerRef.current && isReadyRef.current) {
       try {
-        playerRef.current.loadVideoById(songId, 0);
+        playerRef.current.loadVideoById({
+          videoId: songId,
+          startSeconds: initialSeek
+        });
         playerRef.current.unMute();
         playerRef.current.setVolume(Math.floor(volume * 100));
         if (isPlayingRef.current) {
           playerRef.current.playVideo();
         } else {
-          playerRef.current.cueVideoById(songId, 0);
+          playerRef.current.cueVideoById({
+            videoId: songId,
+            startSeconds: initialSeek
+          });
         }
         pendingSongIdRef.current = null;
+        pendingSeekTimeRef.current = 0;
       } catch (e) {
         console.warn('[SyncTune Audio] loadVideoById error, re-initializing player:', e);
-        initPlayer(songId);
+        initPlayer(songId, initialSeek);
       }
     } else {
-      initPlayer(songId);
+      initPlayer(songId, initialSeek);
     }
   };
 
@@ -467,8 +498,10 @@ export default function YouTubeAudioEngine({
 
   // Global helper methods
   useEffect(() => {
-    window.syncTunePlayAudio = (songId, directAudioUrl = null, title = '', artist = '') => {
+    window.syncTunePlayAudio = (songId, directAudioUrl = null, title = '', artist = '', startSeconds = 0) => {
       const isDirect = Boolean(directAudioUrl && typeof directAudioUrl === 'string' && directAudioUrl.startsWith('http'));
+      const initialSeek = typeof startSeconds === 'number' && startSeconds > 0 ? startSeconds : (pendingSeekTimeRef.current || 0);
+
       if (isDirect) {
         setUseIframeFallback(false);
         useIframeFallbackRef.current = false;
@@ -480,11 +513,14 @@ export default function YouTubeAudioEngine({
             lastSongIdRef.current = songId;
             audioRef.current.src = directAudioUrl;
           }
+          if (initialSeek > 0) {
+            audioRef.current.currentTime = initialSeek;
+          }
           audioRef.current.volume = volume;
           audioRef.current.play().catch(() => {});
         }
       } else {
-        playWithYouTubeEngine(songId || currentSong?.id);
+        playWithYouTubeEngine(songId || currentSong?.id, initialSeek);
       }
     };
 
@@ -498,9 +534,12 @@ export default function YouTubeAudioEngine({
     };
 
     window.syncTuneSeekAudio = (targetSeconds) => {
+      const seekTarget = Math.max(0, Number(targetSeconds) || 0);
+      pendingSeekTimeRef.current = seekTarget;
+
       if (audioRef.current && !useIframeFallbackRef.current) {
         try {
-          audioRef.current.currentTime = targetSeconds;
+          audioRef.current.currentTime = seekTarget;
           if (isPlayingRef.current) {
             audioRef.current.play().catch(() => {});
           }
@@ -508,7 +547,8 @@ export default function YouTubeAudioEngine({
       }
       if (playerRef.current && isReadyRef.current && typeof playerRef.current.seekTo === 'function') {
         try {
-          playerRef.current.seekTo(targetSeconds, true);
+          playerRef.current.seekTo(seekTarget, true);
+          pendingSeekTimeRef.current = 0;
           if (isPlayingRef.current) {
             playerRef.current.unMute();
             playerRef.current.setVolume(Math.floor(volume * 100));
@@ -578,8 +618,12 @@ export default function YouTubeAudioEngine({
         if (playerRef.current && isReadyRef.current) {
           try { playerRef.current.pauseVideo(); } catch (e) {}
         }
+        const initialSeek = Number(currentSong.initialSeekTime ?? currentTime) || 0;
         if (audioRef.current) {
           audioRef.current.src = currentSong.audioUrl;
+          if (initialSeek > 0) {
+            audioRef.current.currentTime = initialSeek;
+          }
           audioRef.current.volume = volume;
           if (isPlaying) {
             audioRef.current.play().catch((err) => {
@@ -590,7 +634,8 @@ export default function YouTubeAudioEngine({
       } else {
         // YouTube track (e.g. Olivia Rodrigo - deja vu, Imagine Dragons - Believer)
         // Immediately start on YouTube Engine without failing on server proxy!
-        playWithYouTubeEngine(currentSong.id);
+        const initialSeek = Number(currentSong.initialSeekTime ?? currentTime) || 0;
+        playWithYouTubeEngine(currentSong.id, initialSeek);
       }
     }
   }, [currentSong?.id, currentSong?.audioUrl, currentSong?.title, currentSong?.artist, currentSong?.playTrigger, volume, isPlaying]);

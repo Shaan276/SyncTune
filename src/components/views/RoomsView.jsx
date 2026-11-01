@@ -413,6 +413,11 @@ export default function RoomsView({
     }
     if (!rawCode) return;
 
+    // Immediately unlock audio pipeline synchronously inside user click event (Critical for iOS / Android mobile)
+    if (typeof window !== 'undefined' && window.syncTuneUnlockAudio) {
+      window.syncTuneUnlockAudio();
+    }
+
     // Stop any currently playing solo song immediately!
     if (typeof window !== 'undefined' && window.syncTunePauseAudio) {
       window.syncTunePauseAudio();
@@ -454,9 +459,13 @@ export default function RoomsView({
           if (incomingQ.length > 0) setRoomRecommendations(incomingQ);
         }
 
-        // Immediately start listening if room has an active song playing!
-        if (data.currentSong && data.isPlaying && onPlaySong) {
-          onPlaySong(data.currentSong, true);
+        // Immediately start listening at the exact room playback position!
+        const roomSong = data.room.currentSong || data.currentSong;
+        const isPlaying = Boolean(data.room.isPlaying ?? data.isPlaying);
+        const accurateTime = Number(data.room.currentTime ?? data.currentTime) || 0;
+
+        if (roomSong && isPlaying && onPlaySong) {
+          onPlaySong(roomSong, true, false, accurateTime);
         }
       }
     } catch (err) {

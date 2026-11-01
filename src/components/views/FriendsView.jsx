@@ -124,6 +124,9 @@ export default function FriendsView({ user, setActiveRoom, setActiveTab }) {
 
   const handleJoinFriendRoom = (code) => {
     if (!code) return;
+    if (typeof window !== 'undefined' && window.syncTuneUnlockAudio) {
+      window.syncTuneUnlockAudio();
+    }
     if (setActiveRoom) setActiveRoom(code);
     if (setActiveTab) setActiveTab('rooms');
   };

@@ -452,14 +452,15 @@ export async function POST(request) {
         existingMember.isOnline = true;
       }
 
+      const sanitized = getSanitizedRoom(room);
       return NextResponse.json({
         success: true,
         code,
-        room: getSanitizedRoom(room),
+        room: sanitized,
         members: room.members,
-        currentSong: room.currentSong,
-        isPlaying: room.isPlaying,
-        currentTime: room.currentTime || 0,
+        currentSong: sanitized.currentSong,
+        isPlaying: sanitized.isPlaying,
+        currentTime: sanitized.currentTime || 0,
         version: room.version || 1,
         queue: room.queue || DEFAULT_ROOM_QUEUE,
         queueVotes: room.queueVotes || {}

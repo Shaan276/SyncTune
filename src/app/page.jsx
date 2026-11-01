@@ -87,7 +87,9 @@ export default function Home() {
       (activeRoomMeta.members || []).some((m) => String(m.id) === String(currentUser.id) && m.isHost)
     )
   );
-  const canControlMusic = !activeRoom || !activeRoomMeta || activeRoomMeta.allowListenerControl !== false || isRoomHost;
+  const canControlMusic = !activeRoom
+    ? true
+    : Boolean(isRoomHost || (activeRoomMeta && activeRoomMeta.allowListenerControl !== false));
   const canControlMusicRef = useRef(canControlMusic);
   canControlMusicRef.current = canControlMusic;
   const isRoomHostRef = useRef(isRoomHost);
@@ -333,7 +335,7 @@ export default function Home() {
   };
 
   // Play a song & synchronize with room members
-  const handlePlaySong = useCallback((song, isFromRoomSync = false, isGoingBack = false) => {
+  const handlePlaySong = useCallback((song, isFromRoomSync = false, isGoingBack = false, initialSeekTime = 0) => {
     if (!song || !song.id) return;
     if (!userRef.current && !isFromRoomSync) {
       setShowAuthModal(true);
@@ -346,14 +348,17 @@ export default function Home() {
       return;
     }
 
+    const seekTime = Math.max(0, Number(initialSeekTime) || 0);
+
     const songToPlay = {
       ...song,
+      initialSeekTime: seekTime,
       playTrigger: Date.now()
     };
 
     setCurrentSong(songToPlay);
     setIsPlaying(true);
-    setCurrentTime(0);
+    setCurrentTime(seekTime);
     setDuration(song.duration || 210);
 
     recordSongPlay(song);
@@ -363,7 +368,7 @@ export default function Home() {
       if (!canControlMusicRef.current) return;
       try {
         const ch = new BroadcastChannel('synctune_room_' + activeRoomRef.current);
-        ch.postMessage({ type: 'PLAY_SONG', song: songToPlay });
+        ch.postMessage({ type: 'PLAY_SONG', song: songToPlay, time: seekTime });
         ch.close();
       } catch (e) {}
 
@@ -374,7 +379,7 @@ export default function Home() {
           action: 'play',
           code: activeRoomRef.current,
           song: songToPlay,
-          currentTime: 0,
+          currentTime: seekTime,
           user: getStableUser(userRef.current)
         })
       }).catch(() => {});
@@ -410,7 +415,7 @@ export default function Home() {
     }
 
     if (typeof window !== 'undefined' && window.syncTunePlayAudio) {
-      window.syncTunePlayAudio(song.id, song.audioUrl, song.title, song.artist);
+      window.syncTunePlayAudio(song.id, song.audioUrl, song.title, song.artist, seekTime);
     }
 
     // Auto-buffer upcoming queue to 10 songs on song start
@@ -481,18 +486,18 @@ export default function Home() {
 
         if (roomSong && roomSong.id) {
           if (!currentSongRef.current || currentSongRef.current.id !== roomSong.id) {
-            handlePlaySong(roomSong, true);
-          }
-          if (roomPlaying) {
-            setIsPlaying(true);
-            window.syncTunePlayAudio?.(roomSong.id, roomSong.audioUrl, roomSong.title, roomSong.artist);
-            if (roomTime > 0) {
-              setCurrentTime(roomTime);
-              setTimeout(() => window.syncTuneSeekAudio?.(roomTime), 300);
-            }
+            handlePlaySong(roomSong, true, false, roomTime);
           } else {
-            setIsPlaying(false);
-            window.syncTunePauseAudio?.();
+            if (roomPlaying) {
+              setIsPlaying(true);
+              if (Math.abs(currentTimeRef.current - roomTime) > 3) {
+                setCurrentTime(roomTime);
+                window.syncTuneSeekAudio?.(roomTime);
+              }
+            } else {
+              setIsPlaying(false);
+              window.syncTunePauseAudio?.();
+            }
           }
         }
       } catch (err) {}
@@ -521,6 +526,31 @@ export default function Home() {
 
           if (data.room) {
             setActiveRoomMeta(data.room);
+            // Continuous soft sync for room listeners: cope up with song and timestamp
+            const isHost = Boolean(
+              String(data.room.host_id) === String(userRef.current?.id) ||
+              (data.room.members || []).some((m) => String(m.id) === String(userRef.current?.id) && m.isHost)
+            );
+            if (!isHost && data.room.currentSong) {
+              const targetSong = data.room.currentSong;
+              const targetPlaying = Boolean(data.room.isPlaying);
+              const targetTime = Number(data.room.currentTime) || 0;
+
+              if (targetPlaying) {
+                if (!currentSongRef.current || currentSongRef.current.id !== targetSong.id) {
+                  handlePlaySong(targetSong, true, false, targetTime);
+                } else if (!isPlayingRef.current) {
+                  setIsPlaying(true);
+                  window.syncTunePlayAudio?.(targetSong.id, targetSong.audioUrl, targetSong.title, targetSong.artist, targetTime);
+                } else if (Math.abs(currentTimeRef.current - targetTime) > 3) {
+                  setCurrentTime(targetTime);
+                  window.syncTuneSeekAudio?.(targetTime);
+                }
+              } else if (isPlayingRef.current) {
+                setIsPlaying(false);
+                window.syncTunePauseAudio?.();
+              }
+            }
           }
 
           // Handle server-triggered event ping instantly
@@ -555,10 +585,7 @@ export default function Home() {
               }
             } else if (ev.type === 'TRACK_CHANGE' && ev.song) {
               if (!isSelfTriggered || !currentSongRef.current || currentSongRef.current.id !== ev.song.id) {
-                handlePlaySong(ev.song, true);
-                if (typeof ev.time === 'number' && ev.time > 0) {
-                  setTimeout(() => window.syncTuneSeekAudio?.(ev.time), 350);
-                }
+                handlePlaySong(ev.song, true, false, ev.time || 0);
               }
             }
           }
