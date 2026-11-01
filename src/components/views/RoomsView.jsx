@@ -128,7 +128,12 @@ export default function RoomsView({
   const activeRoomRef = useRef(activeRoom);
   activeRoomRef.current = activeRoom;
 
-  const currentUser = getStableUser(user);
+  const [currentUser, setCurrentUser] = useState({ id: 'guest_listener', username: 'Listener' });
+
+  useEffect(() => {
+    setCurrentUser(getStableUser(user));
+  }, [user]);
+
   const isHost = activeRoom && (String(roomHostId) === String(currentUser.id) || members.some((m) => String(m.id) === String(currentUser.id) && m.isHost));
   const canControlMusic = !activeRoom || roomAllowListenerControl || isHost;
 

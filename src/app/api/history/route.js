@@ -58,7 +58,7 @@ export async function POST(request) {
     const userIndex = users.findIndex(u => (userId && String(u.id) === String(userId)) || (email && u.email.toLowerCase() === email.toLowerCase()));
 
     if (userIndex === -1) {
-      return NextResponse.json({ success: false, error: 'User not found in database' }, { status: 404 });
+      return NextResponse.json({ success: true, history: [] }, { status: 200 });
     }
 
     const user = users[userIndex];

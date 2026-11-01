@@ -39,6 +39,7 @@ function getStableUser(user) {
 
 export default function Home() {
   const [user, setUser] = useState(null);
+  const [currentUser, setCurrentUser] = useState({ id: 'guest_listener', username: 'Listener' });
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [isClient, setIsClient] = useState(false);
 
@@ -80,7 +81,6 @@ export default function Home() {
   const userRef = useRef(user);
   userRef.current = user;
 
-  const currentUser = getStableUser(user);
   const isRoomHost = Boolean(
     activeRoom && activeRoomMeta && (
       String(activeRoomMeta.host_id) === String(currentUser.id) ||
@@ -108,10 +108,13 @@ export default function Home() {
   // Hydrate user session, history & queue from localStorage
   useEffect(() => {
     setIsClient(true);
+    setCurrentUser(getStableUser(user));
     try {
       const stored = localStorage.getItem('user');
       if (stored && stored !== 'undefined' && stored !== 'null') {
-        setUser(JSON.parse(stored));
+        const parsed = JSON.parse(stored);
+        setUser(parsed);
+        setCurrentUser(parsed);
       } else {
         setShowAuthModal(true);
       }

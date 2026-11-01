@@ -143,6 +143,25 @@ export default function YouTubeAudioEngine({
         console.warn('[SyncTune Audio] loadVideoById error:', e);
       }
     }
+
+    // Direct postMessage dispatch for instant browser playback
+    const iframe = document.querySelector('#synctune-ultra-low-audio-engine iframe');
+    if (iframe?.contentWindow) {
+      try {
+        iframe.contentWindow.postMessage(JSON.stringify({
+          event: 'command',
+          func: 'loadVideoById',
+          args: [{ videoId: songId, startSeconds: 0 }]
+        }), '*');
+        if (isPlayingRef.current) {
+          iframe.contentWindow.postMessage(JSON.stringify({
+            event: 'command',
+            func: 'playVideo',
+            args: []
+          }), '*');
+        }
+      } catch (e) {}
+    }
   };
 
   // 2. Manage Native Audio & Fallback playback when isPlaying changes
@@ -498,7 +517,7 @@ export default function YouTubeAudioEngine({
     };
   }, [volume, currentSong?.audioUrl, currentSong?.title, currentSong?.artist]);
 
-  // 5. Track change handler: Native audio first with automatic failover watchdog
+  // 5. Track change handler: Native audio for direct streams, instant YouTube engine for YouTube tracks
   useEffect(() => {
     if (!currentSong?.id) return;
 
@@ -514,36 +533,31 @@ export default function YouTubeAudioEngine({
         playWatchdogRef.current = null;
       }
 
-      setUseIframeFallback(false);
-      useIframeFallbackRef.current = false;
+      const hasDirectAudio = Boolean(currentSong.audioUrl && typeof currentSong.audioUrl === 'string' && currentSong.audioUrl.startsWith('http'));
 
-      if (playerRef.current && isReadyRef.current) {
-        try { playerRef.current.pauseVideo(); } catch (e) {}
-      }
-
-      if (audioRef.current) {
-        const targetSrc = (currentSong.audioUrl && typeof currentSong.audioUrl === 'string' && currentSong.audioUrl.startsWith('http'))
-          ? currentSong.audioUrl
-          : `/api/stream?id=${encodeURIComponent(currentSong.id)}&title=${encodeURIComponent(currentSong.title || '')}&artist=${encodeURIComponent(currentSong.artist || '')}`;
-
-        audioRef.current.src = targetSrc;
-        audioRef.current.volume = volume;
-        if (isPlaying) {
-          audioRef.current.play().catch((err) => {
-            console.warn('[SyncTune Audio] Direct play deferred:', err);
-          });
-
-          // 4s watchdog: failover to YouTube iframe if native audio does not start
-          playWatchdogRef.current = setTimeout(() => {
-            if (!nativeAudioStartedRef.current && isPlayingRef.current && !useIframeFallbackRef.current) {
-              console.warn('[SyncTune Audio] Failover to YouTube iframe after 4s timeout');
-              playWithYouTubeEngine(currentSong.id);
-            }
-          }, 4000);
+      if (hasDirectAudio) {
+        // High-speed Akamai 320kbps MP4 CDN (plays in 50ms)
+        setUseIframeFallback(false);
+        useIframeFallbackRef.current = false;
+        if (playerRef.current && isReadyRef.current) {
+          try { playerRef.current.pauseVideo(); } catch (e) {}
         }
+        if (audioRef.current) {
+          audioRef.current.src = currentSong.audioUrl;
+          audioRef.current.volume = volume;
+          if (isPlaying) {
+            audioRef.current.play().catch((err) => {
+              console.warn('[SyncTune Audio] Direct play deferred:', err);
+            });
+          }
+        }
+      } else {
+        // YouTube track (e.g. Olivia Rodrigo - deja vu, Imagine Dragons - Believer)
+        // Immediately start on YouTube Engine without failing on server proxy!
+        playWithYouTubeEngine(currentSong.id);
       }
     }
-  }, [currentSong?.id, currentSong?.audioUrl, currentSong?.title, currentSong?.artist, currentSong?.playTrigger, volume]);
+  }, [currentSong?.id, currentSong?.audioUrl, currentSong?.title, currentSong?.artist, currentSong?.playTrigger, volume, isPlaying]);
 
   // 6. Volume change
   useEffect(() => {
