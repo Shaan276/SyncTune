@@ -127,7 +127,10 @@ export default function RoomsView({
   setActiveRoom,
   currentSong,
   onPlaySong,
-  activeRoomMeta
+  activeRoomMeta,
+  customPlaylists = [],
+  likedSongs = [],
+  onPlayPlaylist
 }) {
   const [inputCode, setInputCode] = useState('');
   const [copiedCode, setCopiedCode] = useState(false);
@@ -136,6 +139,7 @@ export default function RoomsView({
   const [roomSearchResults, setRoomSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
   const [joinError, setJoinError] = useState('');
+  const [showPlaylistsModal, setShowPlaylistsModal] = useState(false);
 
   const [chatMsg, setChatMsg] = useState('');
   const [chats, setChats] = useState([]);
@@ -871,6 +875,17 @@ export default function RoomsView({
             </div>
           ) : (
             <div className="flex items-center gap-2 flex-wrap">
+              {canControlMusic && (
+                <button
+                  onClick={() => setShowPlaylistsModal(true)}
+                  className="px-3 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-400 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                  title="Play one of your custom playlists in this room"
+                >
+                  <Disc className="w-3.5 h-3.5" />
+                  <span>Play Playlist in Room</span>
+                </button>
+              )}
+
               <button
                 onClick={handleCopyCode}
                 className="px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-zinc-300 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
@@ -901,6 +916,48 @@ export default function RoomsView({
       {/* Active Room Workspace */}
       {activeRoom ? (
         <div className="flex flex-col gap-6">
+          {/* Live Playback Status & Mobile Catch Up Bar */}
+          {activeRoomMeta?.currentSong && (
+            <div className="p-3.5 px-4 rounded-xl bg-[#080C14] border border-emerald-500/20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-inner">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-3 h-3 rounded-full bg-emerald-400 animate-ping shrink-0" />
+                <div className="flex flex-col min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-black uppercase text-emerald-400 tracking-wider">
+                      Live Room Stream
+                    </span>
+                    {activeRoomMeta.isPlaying ? (
+                      <span className="text-[10px] font-bold text-zinc-400">
+                        • {formatTime(activeRoomMeta.currentTime || 0)} / {formatTime(activeRoomMeta.currentSong.duration || 210)}
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-bold text-amber-400">• Paused by Host</span>
+                    )}
+                  </div>
+                  <span className="text-xs font-bold text-white truncate">
+                    {activeRoomMeta.currentSong.title} — <span className="text-zinc-400">{activeRoomMeta.currentSong.artist}</span>
+                  </span>
+                </div>
+              </div>
+
+              <button
+                onClick={() => {
+                  if (typeof window !== 'undefined' && window.syncTuneUnlockAudio) {
+                    window.syncTuneUnlockAudio();
+                  }
+                  if (onPlaySong && activeRoomMeta.currentSong) {
+                    onPlaySong(activeRoomMeta.currentSong, true, false, activeRoomMeta.currentTime || 0);
+                  }
+                }}
+                className="px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-extrabold flex items-center gap-1.5 transition-all cursor-pointer shadow-md shadow-emerald-500/20 self-end sm:self-auto shrink-0 active:scale-95"
+                title="Force re-sync and unlock audio to catch up to the room stream"
+              >
+                <Radio className="w-3.5 h-3.5 animate-pulse" />
+                <span>Sync Audio 🔊</span>
+              </button>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Room Main Column */}
             <div className="lg:col-span-2 p-5 sm:p-6 rounded-2xl bg-[#0F1626] border border-white/5 flex flex-col gap-6 min-w-0">
@@ -1394,6 +1451,83 @@ export default function RoomsView({
               <Plus className="w-4 h-4" />
               <span>Create Private Room</span>
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Play Playlist in Room */}
+      {showPlaylistsModal && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-2xl bg-[#0F1626] border border-white/10 shadow-2xl p-5 flex flex-col gap-4">
+            <div className="flex items-center justify-between pb-3 border-b border-white/10">
+              <div className="flex items-center gap-2">
+                <Disc className="w-4 h-4 text-emerald-400" />
+                <h3 className="text-sm font-bold text-white">Play Playlist in Room {activeRoom}</h3>
+              </div>
+              <button
+                onClick={() => setShowPlaylistsModal(false)}
+                className="p-1 text-zinc-400 hover:text-white transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-zinc-400">
+              Select a playlist to start streaming track 1 for all members in the room and queue the rest:
+            </p>
+
+            <div className="flex flex-col gap-2 max-h-72 overflow-y-auto custom-scrollbar pr-1">
+              {/* Liked Songs */}
+              {likedSongs && likedSongs.length > 0 && (
+                <div
+                  onClick={() => {
+                    if (onPlayPlaylist) onPlayPlaylist({ name: 'Liked Songs', songs: likedSongs }, true);
+                    setShowPlaylistsModal(false);
+                  }}
+                  className="p-3 rounded-xl bg-[#080C14] border border-white/5 hover:border-pink-500/40 flex items-center justify-between gap-3 cursor-pointer transition-all"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <Heart className="w-4 h-4 text-pink-500 fill-current shrink-0" />
+                    <div className="flex flex-col min-w-0">
+                      <span className="text-xs font-bold text-white truncate">Liked Songs</span>
+                      <span className="text-[10px] text-zinc-400">{likedSongs.length} tracks</span>
+                    </div>
+                  </div>
+                  <span className="text-xs font-bold text-emerald-400 flex items-center gap-1 shrink-0">
+                    <Play className="w-3.5 h-3.5 fill-current" /> Stream in Room
+                  </span>
+                </div>
+              )}
+
+              {/* Custom Playlists */}
+              {customPlaylists && customPlaylists.length > 0 ? (
+                customPlaylists.map((pl) => (
+                  <div
+                    key={pl.id}
+                    onClick={() => {
+                      if (onPlayPlaylist) onPlayPlaylist(pl, true);
+                      setShowPlaylistsModal(false);
+                    }}
+                    className="p-3 rounded-xl bg-[#080C14] border border-white/5 hover:border-emerald-500/40 flex items-center justify-between gap-3 cursor-pointer transition-all"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <Disc className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <div className="flex flex-col min-w-0">
+                        <span className="text-xs font-bold text-white truncate">{pl.name}</span>
+                        <span className="text-[10px] text-zinc-400">{(pl.songs || []).length} tracks</span>
+                      </div>
+                    </div>
+                    <span className="text-xs font-bold text-emerald-400 flex items-center gap-1 shrink-0">
+                      <Play className="w-3.5 h-3.5 fill-current" /> Stream in Room
+                    </span>
+                  </div>
+                ))
+              ) : (!likedSongs || likedSongs.length === 0) ? (
+                <div className="py-8 text-center text-xs text-zinc-500 italic">
+                  No playlists found. Create one in the Playlists tab or save songs from search!
+                </div>
+              ) : null}
+            </div>
           </div>
         </div>
       )}

@@ -56,6 +56,7 @@ export default function Home() {
   const [isLooping, setIsLooping] = useState(false);
   const [history, setHistory] = useState([]);
   const [likedSongs, setLikedSongs] = useState([]);
+  const [customPlaylists, setCustomPlaylists] = useState([]);
   const [searchResults, setSearchResults] = useState([]);
   const [queue, setQueue] = useState([]);
   const [artistRecommendations, setArtistRecommendations] = useState([]);
@@ -169,6 +170,12 @@ export default function Home() {
       const storedLiked = localStorage.getItem('synctune_liked_songs');
       if (storedLiked) {
         setLikedSongs(JSON.parse(storedLiked));
+      }
+      const storedPlaylists = localStorage.getItem('synctune_custom_playlists');
+      if (storedPlaylists) {
+        try {
+          setCustomPlaylists(JSON.parse(storedPlaylists));
+        } catch (e) {}
       }
       const storedQueue = localStorage.getItem('synctune_queue');
       if (storedQueue) {
@@ -587,6 +594,10 @@ export default function Home() {
               if (!isSelfTriggered || !currentSongRef.current || currentSongRef.current.id !== ev.song.id) {
                 handlePlaySong(ev.song, true, false, ev.time || 0);
               }
+            } else if (ev.type === 'PLAYLIST_LOADED' && ev.song) {
+              if (!isSelfTriggered || !currentSongRef.current || currentSongRef.current.id !== ev.song.id) {
+                handlePlaySong(ev.song, true, false, 0);
+              }
             }
           }
         } catch (err) {
@@ -887,6 +898,110 @@ export default function Home() {
     });
   }, []);
 
+  const handleCreatePlaylist = useCallback((name, description = '') => {
+    if (!name || !name.trim()) return null;
+    const newPl = {
+      id: 'pl_' + Date.now(),
+      name: name.trim(),
+      description: description.trim() || 'Custom SyncTune Playlist',
+      songs: []
+    };
+    setCustomPlaylists((prev) => {
+      const updated = [newPl, ...prev];
+      try {
+        localStorage.setItem('synctune_custom_playlists', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
+    return newPl;
+  }, []);
+
+  const handleAddToPlaylist = useCallback((playlistId, song) => {
+    if (!playlistId || !song || !song.id) return;
+    setCustomPlaylists((prev) => {
+      const updated = prev.map((pl) => {
+        if (String(pl.id) !== String(playlistId)) return pl;
+        if (pl.songs.some((s) => s.id === song.id)) return pl;
+        return {
+          ...pl,
+          songs: [...pl.songs, song]
+        };
+      });
+      try {
+        localStorage.setItem('synctune_custom_playlists', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
+  }, []);
+
+  const handleRemoveFromPlaylist = useCallback((playlistId, songId) => {
+    if (!playlistId || !songId) return;
+    setCustomPlaylists((prev) => {
+      const updated = prev.map((pl) => {
+        if (String(pl.id) !== String(playlistId)) return pl;
+        return {
+          ...pl,
+          songs: pl.songs.filter((s) => s.id !== songId)
+        };
+      });
+      try {
+        localStorage.setItem('synctune_custom_playlists', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
+  }, []);
+
+  const handleDeletePlaylist = useCallback((playlistId) => {
+    setCustomPlaylists((prev) => {
+      const updated = prev.filter((pl) => String(pl.id) !== String(playlistId));
+      try {
+        localStorage.setItem('synctune_custom_playlists', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
+  }, []);
+
+  const handlePlayPlaylist = useCallback(async (playlist, playInRoom = false) => {
+    if (!playlist || !Array.isArray(playlist.songs) || playlist.songs.length === 0) {
+      alert("This playlist has no songs yet. Add songs to it first!");
+      return;
+    }
+
+    const firstSong = playlist.songs[0];
+    const remainingSongs = playlist.songs.slice(1);
+
+    if (activeRoomRef.current && (playInRoom || canControlMusicRef.current)) {
+      if (!canControlMusicRef.current) {
+        alert("🔒 Only the room host can play a playlist into this room.");
+        return;
+      }
+
+      try {
+        await fetch('/api/room', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'play_playlist',
+            code: activeRoomRef.current,
+            songs: playlist.songs,
+            playlistName: playlist.name,
+            user: getStableUser(userRef.current)
+          })
+        });
+      } catch (e) {}
+
+      handlePlaySong(firstSong, false, false, 0);
+      return;
+    }
+
+    // Solo mode:
+    handlePlaySong(firstSong);
+    setQueue(remainingSongs);
+    try {
+      localStorage.setItem('synctune_queue', JSON.stringify(remainingSongs));
+    } catch (e) {}
+  }, [handlePlaySong]);
+
   const handleLogout = () => {
     localStorage.removeItem('user');
     localStorage.removeItem('token');
@@ -981,14 +1096,23 @@ export default function Home() {
               currentSong={currentSong}
               onPlaySong={handlePlaySong}
               activeRoomMeta={activeRoomMeta}
+              customPlaylists={customPlaylists}
+              likedSongs={likedSongs}
+              onPlayPlaylist={handlePlayPlaylist}
             />
           )}
 
           {activeTab === 'playlists' && (
             <PlaylistsView
               likedSongs={likedSongs}
+              customPlaylists={customPlaylists}
+              onCreatePlaylist={handleCreatePlaylist}
+              onDeletePlaylist={handleDeletePlaylist}
+              onRemoveFromPlaylist={handleRemoveFromPlaylist}
+              onPlayPlaylist={handlePlayPlaylist}
               onPlaySong={handlePlaySong}
               onToggleLike={handleToggleLike}
+              activeRoom={activeRoom}
             />
           )}
 
@@ -1010,7 +1134,7 @@ export default function Home() {
         </main>
       </div>
 
-      {/* Global Bottom Audio Player */}
+      {/* Global Bottom Audio Player with Save to Playlist */}
       <PlayerFooter
         currentSong={currentSong}
         isPlaying={isPlaying}
@@ -1025,6 +1149,9 @@ export default function Home() {
         onVolumeChange={setVolume}
         likedSongs={likedSongs}
         onToggleLike={handleToggleLike}
+        customPlaylists={customPlaylists}
+        onAddToPlaylist={handleAddToPlaylist}
+        onCreatePlaylist={handleCreatePlaylist}
         history={history}
         queue={queue}
         onToggleQueue={() => setIsQueueOpen(!isQueueOpen)}

@@ -254,26 +254,27 @@ export async function GET(request) {
     return NextResponse.json({ success: true, rooms: list });
   }
 
-  // 2. Full Room State
+  // 2. Full Room State (Always fresh from cloud storage across mobile & desktop)
   if (action === 'get' && code) {
-    const room = await getOrCreateRoom(code);
+    const room = await getOrCreateRoom(code, null, true);
+    const sanitized = getSanitizedRoom(room);
     return NextResponse.json({
       success: true,
-      room: getSanitizedRoom(room),
-      members: room.members || [],
-      currentSong: room.currentSong,
-      isPlaying: Boolean(room.isPlaying),
-      currentTime: room.currentTime || 0,
-      version: room.version || 1,
-      queue: room.queue || DEFAULT_ROOM_QUEUE,
-      queueVotes: room.queueVotes || {}
+      room: sanitized,
+      members: sanitized.members || [],
+      currentSong: sanitized.currentSong,
+      isPlaying: Boolean(sanitized.isPlaying),
+      currentTime: sanitized.currentTime || 0,
+      version: sanitized.version || 1,
+      queue: sanitized.queue || DEFAULT_ROOM_QUEUE,
+      queueVotes: sanitized.queueVotes || {}
     });
   }
 
   // 3. Event Ping Listener (Zero Polling Hammering)
   if (action === 'ping' && code) {
     const clientVersion = parseInt(searchParams.get('version') || '0', 10);
-    const room = await getOrCreateRoom(code);
+    const room = await getOrCreateRoom(code, null, true);
 
     // If room already has a newer event than client's version, return immediately!
     if ((room.version || 0) > clientVersion && room.lastEvent) {
@@ -311,7 +312,7 @@ export async function GET(request) {
         resolved = true;
         roomEvents.removeListener(`room_update_${code}`, onUpdate);
 
-        const currentRoom = await getOrCreateRoom(code);
+        const currentRoom = await getOrCreateRoom(code, null, true);
         if ((currentRoom.version || 0) > clientVersion && currentRoom.lastEvent) {
           resolve(
             NextResponse.json({
@@ -617,6 +618,58 @@ export async function POST(request) {
         syncRoomToCloud(room);
         return NextResponse.json({ success: true, queue: room.queue });
       }
+    }
+
+    // 9b. PLAY PLAYLIST IN ROOM (Replaces current track and room queue)
+    if (action === 'play_playlist') {
+      if (!canControl) {
+        return NextResponse.json({ success: false, error: '🔒 Only the room host can play a playlist into this room.' }, { status: 403 });
+      }
+      const playlistSongs = Array.isArray(body.songs) ? body.songs : [];
+      if (playlistSongs.length === 0) {
+        return NextResponse.json({ success: false, error: 'Playlist is empty.' }, { status: 400 });
+      }
+
+      const firstSong = playlistSongs[0];
+      const remainingQueue = playlistSongs.slice(1);
+
+      room.currentSong = firstSong;
+      room.isPlaying = true;
+      room.currentTime = 0;
+      room.queue = remainingQueue;
+      room.queueVotes = {};
+      room.lastUpdated = Date.now();
+      room.version = (room.version || 0) + 1;
+      room.lastEvent = {
+        type: 'PLAYLIST_LOADED',
+        song: firstSong,
+        queue: remainingQueue,
+        time: 0,
+        version: room.version,
+        triggeredBy: user.username || 'Host',
+        triggeredById: String(user.id || ''),
+        playlistName: body.playlistName || 'Playlist'
+      };
+
+      // Add system announcement in chat with IST timestamp
+      if (!room.chats) room.chats = [];
+      room.chats.push({
+        id: `sys_pl_${Date.now()}`,
+        sender: 'System',
+        isSystem: true,
+        message: `🎶 ${user.username || 'Host'} loaded playlist: "${body.playlistName || 'Custom Playlist'}" (${playlistSongs.length} tracks)`,
+        timestamp: getISTTimestamp()
+      });
+      if (room.chats.length > 50) room.chats.shift();
+
+      notifyRoomListeners(room);
+      await syncRoomToCloud(room);
+      return NextResponse.json({
+        success: true,
+        room: getSanitizedRoom(room),
+        currentSong: firstSong,
+        queue: remainingQueue
+      });
     }
 
     // 10. UPVOTE SONG IN ROOM QUEUE (Collective 1 + 1 + 1 votes across all players)
