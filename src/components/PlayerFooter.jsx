@@ -174,8 +174,8 @@ export default function PlayerFooter({
 
           {/* Desktop Time Indicators */}
           <div className="flex items-center justify-between w-full text-[10px] text-zinc-400 font-mono px-1">
-            <span>{formatTime(currentTime)}</span>
-            <span>{formatTime(duration)}</span>
+            <span>{currentSong ? formatTime(currentTime) : '0:00'}</span>
+            <span>{currentSong ? formatTime(duration) : '0:00'}</span>
           </div>
         </div>
 

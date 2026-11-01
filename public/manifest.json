@@ -1,0 +1,18 @@
+{
+  "name": "SyncTune - Pure Audio OS",
+  "short_name": "SyncTune",
+  "description": "Listen to music together in sync with ultra-low data consumption and background audio.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0B0F19",
+  "theme_color": "#10b981",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

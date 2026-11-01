@@ -51,7 +51,7 @@ export default function Home() {
   const [currentSong, setCurrentSong] = useState(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(180);
+  const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(0.8);
   const [isLooping, setIsLooping] = useState(false);
   const [history, setHistory] = useState([]);

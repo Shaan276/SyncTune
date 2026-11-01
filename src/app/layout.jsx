@@ -1,10 +1,21 @@
 import '../styles/globals.css';
 
+export const viewport = {
+  themeColor: '#10b981',
+};
+
 export const metadata = {
   title: 'SyncTune - Listen Together & Watch Together',
   description: 'Synchronized low-data music and cinema room streaming powered by Next.js & Supabase Realtime.',
+  manifest: '/manifest.json',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'black-translucent',
+    title: 'SyncTune'
+  },
   icons: {
     icon: '/favicon.svg',
+    apple: '/favicon.svg'
   },
 };
 

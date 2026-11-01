@@ -548,8 +548,9 @@ export default function DashboardView({
                 >
                   <div className="flex items-center gap-3 min-w-0 flex-1">
                     <img
-                      src={item.thumbnail}
+                      src={item.thumbnail || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=300&auto=format&fit=crop&q=80'}
                       alt={item.title}
+                      onError={(e) => { e.currentTarget.src = 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=300&auto=format&fit=crop&q=80'; }}
                       className="w-10 h-10 rounded-lg object-cover shrink-0"
                       loading="lazy"
                     />

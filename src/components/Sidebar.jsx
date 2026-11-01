@@ -1,5 +1,5 @@
 'use client';
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Compass,
   Radio,
@@ -9,6 +9,7 @@ import {
   LogOut,
   User,
   Heart,
+  Smartphone,
   X
 } from 'lucide-react';
 
@@ -23,6 +24,28 @@ export default function Sidebar({
   isMobileOpen = false,
   onCloseMobile
 }) {
+  const [installPrompt, setInstallPrompt] = useState(null);
+
+  useEffect(() => {
+    const handleBeforeInstall = (e) => {
+      e.preventDefault();
+      setInstallPrompt(e);
+    };
+    window.addEventListener('beforeinstallprompt', handleBeforeInstall);
+    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
+  }, []);
+
+  const handleInstallApp = async () => {
+    if (installPrompt) {
+      installPrompt.prompt();
+      const choice = await installPrompt.userChoice;
+      if (choice.outcome === 'accepted') {
+        setInstallPrompt(null);
+      }
+    } else {
+      alert("📱 To install SyncTune on your mobile:\n\n1. In Chrome/Brave: Tap the three dots (⋮) in the top-right corner and select 'Install app' or 'Add to Home screen'.\n2. In Safari (iPhone): Tap the Share button (⎋) at the bottom and select 'Add to Home Screen'.");
+    }
+  };
   const coreNav = [
     { id: 'dashboard', label: 'Dashboard', icon: Compass },
     { id: 'rooms', label: 'Listening Rooms', icon: Radio, badge: activeRoom ? `Synced` : null },
@@ -138,8 +161,16 @@ export default function Sidebar({
         </div>
       </div>
 
-      {/* Footer User Profile */}
+      {/* Footer User Profile & App Install */}
       <div className="pt-3 border-t border-white/5 flex flex-col gap-2">
+        <button
+          onClick={handleInstallApp}
+          className="w-full py-2 px-3 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 text-emerald-300 font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm"
+          title="Install SyncTune on your mobile home screen"
+        >
+          <Smartphone className="w-3.5 h-3.5 text-emerald-400" />
+          <span>Install Mobile App</span>
+        </button>
         {user ? (
           <div className="p-2.5 rounded-xl bg-[#0F1626] border border-white/5 flex flex-col gap-2">
             <div className="flex items-center justify-between min-w-0">
