@@ -179,7 +179,7 @@ async function getAudioUrl(videoId) {
   try {
     const fetchPromise = yt.getInfo(videoId);
     const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('YTDL stream fetch timed out')), 3500)
+      setTimeout(() => reject(new Error('YTDL stream fetch timed out')), 1500)
     );
     const info = await Promise.race([fetchPromise, timeoutPromise]);
     const audioFormats = info.formats?.filter(f => f.hasAudio && !f.hasVideo) || [];
