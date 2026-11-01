@@ -29,14 +29,18 @@ export default function YouTubeAudioEngine({
   isPlayingRef.current = isPlaying;
   const currentSongRef = useRef(currentSong);
   currentSongRef.current = currentSong;
+  const volumeRef = useRef(volume);
+  volumeRef.current = volume;
 
   const [useIframeFallback, setUseIframeFallback] = useState(false);
   const useIframeFallbackRef = useRef(false);
   useIframeFallbackRef.current = useIframeFallback;
 
   const pendingSongIdRef = useRef(null);
+  const pendingSeekTimeRef = useRef(0);
   const playWatchdogRef = useRef(null);
   const nativeAudioStartedRef = useRef(false);
+  const audioContextRef = useRef(null);
 
   const onEndedRef = useRef(onEnded);
   const onTimeUpdateRef = useRef(onTimeUpdate);
@@ -82,6 +86,7 @@ export default function YouTubeAudioEngine({
         } catch (e) {}
       }
 
+      // Unlock HTML5 Audio
       const audio = audioRef.current;
       if (audio && isPlayingRef.current && !useIframeFallbackRef.current) {
         audio.play().catch(() => {});
@@ -91,14 +96,38 @@ export default function YouTubeAudioEngine({
         silent.play().catch(() => {});
       }
 
+      // Web Audio API AudioContext carrier - keeps hardware AudioTrack permanently open in Android OS
+      try {
+        if (!audioContextRef.current) {
+          const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+          if (AudioContextClass) {
+            const ctx = new AudioContextClass();
+            // Inaudible continuous oscillator (amplitude 0.00005) ensures the browser's audio
+            // output stream remains registered with the OS mixer during minimize / lock screen.
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            gain.gain.value = 0.00005;
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start();
+            audioContextRef.current = ctx;
+          }
+        }
+        if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+          audioContextRef.current.resume().catch(() => {});
+        }
+      } catch (e) {}
+
       if (useIframeFallbackRef.current && playerRef.current && isReadyRef.current && isPlayingRef.current) {
         try {
           playerRef.current.unMute();
-          playerRef.current.setVolume(Math.floor(volume * 100));
+          playerRef.current.setVolume(Math.floor(volumeRef.current * 100));
           playerRef.current.playVideo();
         } catch (e) {}
       }
     };
+
+    window.syncTuneUnlockAudio = unlockAudioSession;
 
     window.addEventListener('touchstart', unlockAudioSession, { passive: true });
     window.addEventListener('touchend', unlockAudioSession, { passive: true });
@@ -113,10 +142,15 @@ export default function YouTubeAudioEngine({
     };
   }, [volume]);
 
-  // Helper: Initialize or recreate YouTube player with a VALID video ID
-  const initPlayer = (songId) => {
+  // Helper: Initialize or recreate YouTube player with a VALID video ID and start timestamp
+  const initPlayer = (songId, startSeconds = 0) => {
     const targetId = songId || pendingSongIdRef.current || currentSongRef.current?.id;
     if (!targetId || typeof window === 'undefined') return;
+
+    const initialSeek = typeof startSeconds === 'number' && startSeconds > 0 ? startSeconds : (pendingSeekTimeRef.current || 0);
+    if (initialSeek > 0) {
+      pendingSeekTimeRef.current = initialSeek;
+    }
 
     if (!window.YT || !window.YT.Player) {
       pendingSongIdRef.current = targetId;
@@ -159,6 +193,7 @@ export default function YouTubeAudioEngine({
           showinfo: 0,
           modestbranding: 1,
           playsinline: 1,
+          start: Math.floor(initialSeek || 0),
           suggestedQuality: 'small',
           origin: typeof window !== 'undefined' ? window.location.origin : ''
         },
@@ -175,17 +210,27 @@ export default function YouTubeAudioEngine({
                 }
               }
               event.target.setPlaybackQuality('small');
-              event.target.setVolume(Math.floor(volume * 100));
+              event.target.setVolume(Math.floor(volumeRef.current * 100));
               event.target.unMute();
+
               const latestSongId = pendingSongIdRef.current || currentSongRef.current?.id;
+              const targetSeek = pendingSeekTimeRef.current || initialSeek || 0;
+
               if (latestSongId && latestSongId !== targetId) {
-                event.target.loadVideoById(latestSongId, 0);
+                event.target.loadVideoById({
+                  videoId: latestSongId,
+                  startSeconds: targetSeek
+                });
+              } else if (targetSeek > 0) {
+                event.target.seekTo(targetSeek, true);
               }
+
               if (isPlayingRef.current) {
                 event.target.unMute();
                 event.target.playVideo();
               }
               pendingSongIdRef.current = null;
+              pendingSeekTimeRef.current = 0;
             } catch (e) {}
           },
           onError: (event) => {
@@ -200,7 +245,7 @@ export default function YouTubeAudioEngine({
             if (event.data === window.YT.PlayerState.PLAYING) {
               try {
                 event.target.unMute();
-                event.target.setVolume(Math.floor(volume * 100));
+                event.target.setVolume(Math.floor(volumeRef.current * 100));
               } catch (e) {}
               if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
                 navigator.mediaSession.playbackState = 'playing';
@@ -208,14 +253,34 @@ export default function YouTubeAudioEngine({
               }
             } else if (event.data === window.YT.PlayerState.PAUSED) {
               if (isPlayingRef.current) {
+                // If mobile OS attempted to pause iframe video because Chrome was minimized,
+                // re-assert playback immediately using the active Web Audio session
+                try {
+                  if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+                    audioContextRef.current.resume().catch(() => {});
+                  }
+                  if (silentAudioRef.current && silentAudioRef.current.paused) {
+                    silentAudioRef.current.play().catch(() => {});
+                  }
+                  if (playerRef.current) {
+                    playerRef.current.unMute();
+                    playerRef.current.setVolume(Math.floor(volumeRef.current * 100));
+                    playerRef.current.playVideo();
+                  }
+                } catch (e) {}
+
+                // Immediate retry for Android Chrome task-runner
                 setTimeout(() => {
                   try {
                     if (isPlayingRef.current && playerRef.current) {
-                      playerRef.current.unMute();
-                      playerRef.current.playVideo();
+                      const state = playerRef.current.getPlayerState();
+                      if (state === 2) {
+                        playerRef.current.unMute();
+                        playerRef.current.playVideo();
+                      }
                     }
                   } catch (e) {}
-                }, 50);
+                }, 40);
               } else if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
                 navigator.mediaSession.playbackState = 'paused';
               }
@@ -232,12 +297,17 @@ export default function YouTubeAudioEngine({
     }
   };
 
-  // Helper: Switch immediately to pre-warmed YouTube Engine
-  const playWithYouTubeEngine = (songId) => {
+  // Helper: Switch immediately to pre-warmed YouTube Engine with timestamp support
+  const playWithYouTubeEngine = (songId, startSeconds = 0) => {
     if (!songId) return;
     setUseIframeFallback(true);
     useIframeFallbackRef.current = true;
     pendingSongIdRef.current = songId;
+
+    const initialSeek = typeof startSeconds === 'number' && startSeconds > 0 ? startSeconds : (pendingSeekTimeRef.current || 0);
+    if (initialSeek > 0) {
+      pendingSeekTimeRef.current = initialSeek;
+    }
 
     if (audioRef.current) {
       try {
@@ -249,23 +319,34 @@ export default function YouTubeAudioEngine({
       silentAudioRef.current.play().catch(() => {});
     }
 
+    if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+      audioContextRef.current.resume().catch(() => {});
+    }
+
     if (playerRef.current && isReadyRef.current) {
       try {
-        playerRef.current.loadVideoById(songId, 0);
+        playerRef.current.loadVideoById({
+          videoId: songId,
+          startSeconds: initialSeek
+        });
         playerRef.current.unMute();
-        playerRef.current.setVolume(Math.floor(volume * 100));
+        playerRef.current.setVolume(Math.floor(volumeRef.current * 100));
         if (isPlayingRef.current) {
           playerRef.current.playVideo();
         } else {
-          playerRef.current.cueVideoById(songId, 0);
+          playerRef.current.cueVideoById({
+            videoId: songId,
+            startSeconds: initialSeek
+          });
         }
         pendingSongIdRef.current = null;
+        pendingSeekTimeRef.current = 0;
       } catch (e) {
         console.warn('[SyncTune Audio] loadVideoById error, re-initializing player:', e);
-        initPlayer(songId);
+        initPlayer(songId, initialSeek);
       }
     } else {
-      initPlayer(songId);
+      initPlayer(songId, initialSeek);
     }
   };
 
@@ -289,11 +370,17 @@ export default function YouTubeAudioEngine({
       }
     }
 
+    if (audioContextRef.current) {
+      if (isPlaying && audioContextRef.current.state === 'suspended') {
+        audioContextRef.current.resume().catch(() => {});
+      }
+    }
+
     if (useIframeFallback && playerRef.current && isReadyRef.current) {
       try {
         if (isPlaying) {
           playerRef.current.unMute();
-          playerRef.current.setVolume(Math.floor(volume * 100));
+          playerRef.current.setVolume(Math.floor(volumeRef.current * 100));
           playerRef.current.playVideo();
         } else {
           playerRef.current.pauseVideo();
@@ -358,10 +445,13 @@ export default function YouTubeAudioEngine({
         if (silentAudioRef.current) {
           silentAudioRef.current.play().catch(() => {});
         }
+        if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+          audioContextRef.current.resume().catch(() => {});
+        }
         if (useIframeFallbackRef.current && playerRef.current && isReadyRef.current) {
           try {
             playerRef.current.unMute();
-            playerRef.current.setVolume(Math.floor(volume * 100));
+            playerRef.current.setVolume(Math.floor(volumeRef.current * 100));
             playerRef.current.playVideo();
           } catch (e) {}
         }
@@ -467,8 +557,10 @@ export default function YouTubeAudioEngine({
 
   // Global helper methods
   useEffect(() => {
-    window.syncTunePlayAudio = (songId, directAudioUrl = null, title = '', artist = '') => {
+    window.syncTunePlayAudio = (songId, directAudioUrl = null, title = '', artist = '', startSeconds = 0) => {
       const isDirect = Boolean(directAudioUrl && typeof directAudioUrl === 'string' && directAudioUrl.startsWith('http'));
+      const initialSeek = typeof startSeconds === 'number' && startSeconds > 0 ? startSeconds : (pendingSeekTimeRef.current || 0);
+
       if (isDirect) {
         setUseIframeFallback(false);
         useIframeFallbackRef.current = false;
@@ -476,15 +568,18 @@ export default function YouTubeAudioEngine({
           try { playerRef.current.pauseVideo(); } catch (e) {}
         }
         if (audioRef.current) {
-          if (songId && songId !== lastSongIdRef.current) {
+          if (lastSongIdRef.current !== songId) {
             lastSongIdRef.current = songId;
             audioRef.current.src = directAudioUrl;
           }
-          audioRef.current.volume = volume;
+          if (initialSeek > 0) {
+            audioRef.current.currentTime = initialSeek;
+          }
+          audioRef.current.volume = volumeRef.current;
           audioRef.current.play().catch(() => {});
         }
       } else {
-        playWithYouTubeEngine(songId || currentSong?.id);
+        playWithYouTubeEngine(songId || currentSongRef.current?.id, initialSeek);
       }
     };
 
@@ -498,9 +593,12 @@ export default function YouTubeAudioEngine({
     };
 
     window.syncTuneSeekAudio = (targetSeconds) => {
+      const seekTarget = Math.max(0, Number(targetSeconds) || 0);
+      pendingSeekTimeRef.current = seekTarget;
+
       if (audioRef.current && !useIframeFallbackRef.current) {
         try {
-          audioRef.current.currentTime = targetSeconds;
+          audioRef.current.currentTime = seekTarget;
           if (isPlayingRef.current) {
             audioRef.current.play().catch(() => {});
           }
@@ -508,28 +606,33 @@ export default function YouTubeAudioEngine({
       }
       if (playerRef.current && isReadyRef.current && typeof playerRef.current.seekTo === 'function') {
         try {
-          playerRef.current.seekTo(targetSeconds, true);
+          playerRef.current.seekTo(seekTarget, true);
+          pendingSeekTimeRef.current = 0;
           if (isPlayingRef.current) {
             playerRef.current.unMute();
-            playerRef.current.setVolume(Math.floor(volume * 100));
+            playerRef.current.setVolume(Math.floor(volumeRef.current * 100));
             playerRef.current.playVideo();
           }
         } catch (e) {}
       }
     };
 
+    // Lifecycle: NEVER pause audio when tab is minimized or visibility changes
     const handleVisibilityChange = () => {
-      if (!document.hidden && isPlayingRef.current) {
+      if (isPlayingRef.current) {
         try {
+          if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+            audioContextRef.current.resume().catch(() => {});
+          }
+          if (silentAudioRef.current && silentAudioRef.current.paused) {
+            silentAudioRef.current.play().catch(() => {});
+          }
           if (audioRef.current && !useIframeFallbackRef.current && audioRef.current.paused) {
             audioRef.current.play().catch(() => {});
           }
           if (useIframeFallbackRef.current && playerRef.current) {
-            if (silentAudioRef.current && silentAudioRef.current.paused) {
-              silentAudioRef.current.play().catch(() => {});
-            }
             playerRef.current.unMute();
-            playerRef.current.setVolume(Math.floor(volume * 100));
+            playerRef.current.setVolume(Math.floor(volumeRef.current * 100));
             playerRef.current.playVideo();
           }
           if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
@@ -570,6 +673,7 @@ export default function YouTubeAudioEngine({
       }
 
       const hasDirectAudio = Boolean(currentSong.audioUrl && typeof currentSong.audioUrl === 'string' && currentSong.audioUrl.startsWith('http'));
+      const initialSeek = Number(currentSong.initialSeekTime ?? currentTime) || 0;
 
       if (hasDirectAudio) {
         // High-speed Akamai 320kbps MP4 CDN (plays in 50ms)
@@ -580,7 +684,10 @@ export default function YouTubeAudioEngine({
         }
         if (audioRef.current) {
           audioRef.current.src = currentSong.audioUrl;
-          audioRef.current.volume = volume;
+          if (initialSeek > 0) {
+            audioRef.current.currentTime = initialSeek;
+          }
+          audioRef.current.volume = volumeRef.current;
           if (isPlaying) {
             audioRef.current.play().catch((err) => {
               console.warn('[SyncTune Audio] Direct play deferred:', err);
@@ -590,7 +697,7 @@ export default function YouTubeAudioEngine({
       } else {
         // YouTube track (e.g. Olivia Rodrigo - deja vu, Imagine Dragons - Believer)
         // Immediately start on YouTube Engine without failing on server proxy!
-        playWithYouTubeEngine(currentSong.id);
+        playWithYouTubeEngine(currentSong.id, initialSeek);
       }
     }
   }, [currentSong?.id, currentSong?.audioUrl, currentSong?.title, currentSong?.artist, currentSong?.playTrigger, volume, isPlaying]);
@@ -598,13 +705,12 @@ export default function YouTubeAudioEngine({
   // 6. Volume change
   useEffect(() => {
     if (audioRef.current) {
-      audioRef.current.volume = Math.max(0, Math.min(1, volume));
+      audioRef.current.volume = volume;
     }
-    if (playerRef.current && isReadyRef.current) {
+    if (playerRef.current && isReadyRef.current && typeof playerRef.current.setVolume === 'function') {
       try {
         playerRef.current.setVolume(Math.floor(volume * 100));
-        if (volume > 0) playerRef.current.unMute();
-      } catch (err) {}
+      } catch (e) {}
     }
   }, [volume]);
 
@@ -632,7 +738,7 @@ export default function YouTubeAudioEngine({
                 playerRef.current.playVideo();
               } else if (state === 1 && typeof playerRef.current.isMuted === 'function' && playerRef.current.isMuted()) {
                 playerRef.current.unMute();
-                playerRef.current.setVolume(Math.floor(volume * 100));
+                playerRef.current.setVolume(Math.floor(volumeRef.current * 100));
               }
             }
           } catch (e) {}
@@ -723,7 +829,16 @@ export default function YouTubeAudioEngine({
         loop
         playsInline
         preload="auto"
-        style={{ display: 'none' }}
+        style={{
+          position: 'fixed',
+          bottom: 0,
+          right: 0,
+          width: '1px',
+          height: '1px',
+          opacity: 0.001,
+          pointerEvents: 'none',
+          zIndex: -1
+        }}
       />
 
       {/* High-fidelity YouTube Engine container: standard 320x240 geometry with scale(0.001) and zIndex: 1 to ensure browser unmuted autoplay authorization */}
