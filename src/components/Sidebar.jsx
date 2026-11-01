@@ -227,7 +227,7 @@ export default function Sidebar({
       {isMobileOpen && (
         <div className="fixed inset-0 z-50 md:hidden flex animate-in fade-in duration-200">
           <div
-            className="fixed inset-0 bg-black/75 backdrop-blur-sm"
+            className="fixed inset-0 bg-black/80"
             onClick={onCloseMobile}
           />
           <div className="relative z-10 h-full max-w-[280px] w-full shadow-2xl animate-in slide-in-from-left duration-200">

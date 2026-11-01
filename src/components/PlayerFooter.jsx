@@ -55,7 +55,7 @@ export default function PlayerFooter({
   const progressPercent = duration > 0 ? Math.min(100, Math.max(0, (currentTime / duration) * 100)) : 0;
 
   return (
-    <footer className="fixed bottom-0 left-0 right-0 bg-[#0B0F19]/95 backdrop-blur-md border-t border-white/5 z-40 select-none shadow-2xl">
+    <footer className="fixed bottom-0 left-0 right-0 bg-[#0B0F19] border-t border-white/10 z-40 select-none shadow-2xl">
       {/* 1. Sleek Full-Width Top Progress Bar (Interactive scrubber) */}
       <div className="relative w-full h-1 bg-[#141C30] hover:h-2 transition-all cursor-pointer group">
         <div

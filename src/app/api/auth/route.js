@@ -4,35 +4,25 @@ import path from 'path';
 
 export const dynamic = 'force-dynamic';
 
+const CLOUD_USERS_BIN = 'https://extendsclass.com/api/json-storage/bin/fccfdcb';
 const dataDir = path.join(process.cwd(), 'data');
 const usersFilePath = path.join(dataDir, 'users.json');
 
-// Ensure directory and initial file exist
+if (!global._synctune_accounts_cache) {
+  global._synctune_accounts_cache = {
+    accounts: null,
+    lastFetched: 0
+  };
+}
+
 function getAccountsFromDisk() {
   try {
-    if (!fs.existsSync(dataDir)) {
-      fs.mkdirSync(dataDir, { recursive: true });
+    if (fs.existsSync(usersFilePath)) {
+      const raw = fs.readFileSync(usersFilePath, 'utf-8');
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
     }
-    if (!fs.existsSync(usersFilePath)) {
-      const defaultUsers = [
-        {
-          id: 1,
-          username: 'Piyush',
-          email: 'piyushpilkhwal74@gmail.com',
-          password: 'admin',
-          role: 'admin',
-          createdAt: '2026-08-30T00:00:00.000Z'
-        }
-      ];
-      fs.writeFileSync(usersFilePath, JSON.stringify(defaultUsers, null, 2), 'utf-8');
-      return defaultUsers;
-    }
-    const raw = fs.readFileSync(usersFilePath, 'utf-8');
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) return parsed;
-  } catch (err) {
-    console.error('Error reading users from disk:', err);
-  }
+  } catch (err) {}
   return [
     {
       id: 1,
@@ -53,9 +43,85 @@ function saveAccountsToDisk(accounts) {
     fs.writeFileSync(usersFilePath, JSON.stringify(accounts, null, 2), 'utf-8');
     return true;
   } catch (err) {
-    console.error('Error saving users to disk:', err);
     return false;
   }
+}
+
+// Global cross-device account fetcher (Syncs Mobile & PC seamlessly)
+async function getAccounts(forceFresh = false) {
+  const cache = global._synctune_accounts_cache;
+  const now = Date.now();
+
+  if (!forceFresh && cache.accounts && (now - cache.lastFetched < 3000)) {
+    return cache.accounts;
+  }
+
+  // 1. Fetch from cloud multi-device persistent store
+  try {
+    const res = await fetch(`${CLOUD_USERS_BIN}?_t=${now}`, {
+      headers: { 'Accept': 'application/json' },
+      cache: 'no-store'
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data.users) && data.users.length > 0) {
+        cache.accounts = data.users;
+        cache.lastFetched = now;
+        saveAccountsToDisk(data.users);
+        return cache.accounts;
+      }
+    }
+  } catch (err) {
+    console.warn('Cloud accounts fetch deferred:', err.message);
+  }
+
+  // 2. Fallback to memory or disk
+  if (cache.accounts) return cache.accounts;
+  const diskAccounts = getAccountsFromDisk();
+  cache.accounts = diskAccounts;
+  cache.lastFetched = now;
+  return diskAccounts;
+}
+
+// Global cross-device account saver
+async function saveAccounts(accounts) {
+  const cache = global._synctune_accounts_cache;
+  cache.accounts = accounts;
+  cache.lastFetched = Date.now();
+
+  saveAccountsToDisk(accounts);
+
+  try {
+    await fetch(CLOUD_USERS_BIN, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ users: accounts })
+    });
+  } catch (err) {
+    console.warn('Cloud accounts sync deferred:', err.message);
+  }
+  return true;
+}
+
+export async function GET(request) {
+  const { searchParams } = new URL(request.url);
+  const action = (searchParams.get('action') || 'search').toLowerCase();
+  const query = (searchParams.get('q') || '').trim().toLowerCase();
+
+  const accounts = await getAccounts(true);
+
+  if (action === 'search' && query) {
+    const results = accounts
+      .filter((a) => a.username.toLowerCase().includes(query) || a.email.toLowerCase().includes(query))
+      .map(({ password, ...safe }) => safe)
+      .slice(0, 10);
+    return NextResponse.json({ success: true, users: results });
+  }
+
+  return NextResponse.json({
+    success: true,
+    total: accounts.length
+  });
 }
 
 export async function POST(request) {
@@ -66,8 +132,8 @@ export async function POST(request) {
     const rawUsername = (body.username || '').trim();
     const password = body.password || '';
 
-    // Always load current persisted accounts from disk
-    const accounts = getAccountsFromDisk();
+    // Always fetch latest cloud-synced accounts
+    const accounts = await getAccounts(true);
 
     // 1. REGISTER (Create New ID)
     if (action === 'register') {
@@ -105,7 +171,7 @@ export async function POST(request) {
       };
 
       accounts.push(newAccount);
-      saveAccountsToDisk(accounts);
+      await saveAccounts(accounts);
 
       const { password: _, ...safeUser } = newAccount;
       return NextResponse.json({

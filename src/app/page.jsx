@@ -782,7 +782,7 @@ export default function Home() {
           onToggleMobileSidebar={() => setIsMobileSidebarOpen((prev) => !prev)}
         />
 
-        <main className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 custom-scrollbar">
+        <main className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 custom-scrollbar optimized-scroll">
           {activeTab === 'dashboard' && (
             <DashboardView
               user={user}

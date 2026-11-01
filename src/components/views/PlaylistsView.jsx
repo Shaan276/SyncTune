@@ -148,7 +148,7 @@ export default function PlaylistsView({ likedSongs = [], onPlaySong, onToggleLik
 
       {/* Modal: Create New Playlist */}
       {showCreateModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 bg-black/85 flex items-center justify-center p-4">
           <div className="p-6 rounded-2xl bg-[#0F1626] border border-white/10 w-full max-w-md flex flex-col gap-4 shadow-2xl">
             <div className="flex items-center justify-between pb-2 border-b border-white/10">
               <h3 className="text-sm font-bold text-white">Create New Custom Playlist</h3>

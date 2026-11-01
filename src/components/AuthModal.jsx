@@ -157,11 +157,8 @@ export default function AuthModal({ onLogin, onClose, allowClose = false }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4">
       <div className="w-full max-w-md p-7 rounded-2xl bg-[#0F1626] border border-white/10 shadow-2xl relative overflow-hidden flex flex-col gap-6 animate-in fade-in zoom-in duration-200">
-        {/* Glow ambient background accents */}
-        <div className="absolute top-0 right-0 w-52 h-52 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute bottom-0 left-0 w-52 h-52 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none" />
 
         {/* Brand Header */}
         <div className="flex flex-col items-center text-center gap-2">
@@ -233,12 +230,14 @@ export default function AuthModal({ onLogin, onClose, allowClose = false }) {
           )}
 
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-bold text-zinc-300">Email Address</label>
+            <label className="text-xs font-bold text-zinc-300">
+              {isRegister ? 'Email Address' : 'Email or Username'}
+            </label>
             <div className="flex items-center gap-3 px-3.5 py-2.5 rounded-xl bg-[#080C14] border border-white/10 focus-within:border-emerald-500/60 transition-all">
               <Mail className="w-4 h-4 text-emerald-400" />
               <input
-                type="email"
-                placeholder="your.email@example.com"
+                type={isRegister ? 'email' : 'text'}
+                placeholder={isRegister ? 'your.email@example.com' : 'Enter email or username'}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full bg-transparent text-xs text-white outline-none placeholder:text-zinc-500"

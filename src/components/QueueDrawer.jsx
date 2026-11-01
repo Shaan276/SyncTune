@@ -45,7 +45,7 @@ export default function QueueDrawer({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex justify-end animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-50 bg-black/80 flex justify-end animate-in fade-in duration-200">
       <div className="w-full max-w-md h-full bg-[#0B0F19] border-l border-white/5 p-5 sm:p-6 flex flex-col gap-4 shadow-2xl overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between pb-3 border-b border-white/5 shrink-0">

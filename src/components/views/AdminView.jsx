@@ -324,7 +324,7 @@ export default function AdminView({ user, setActiveRoom }) {
 
       {/* Add User Modal */}
       {showAddUserModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/85 z-50 flex items-center justify-center p-4">
           <div className="p-6 rounded-2xl bg-[#0F1626] border border-[#1E293B] w-full max-w-md flex flex-col gap-4 shadow-2xl">
             <h3 className="text-sm font-bold text-white uppercase tracking-wider">Provision New Account</h3>
             <form onSubmit={handleAddUser} className="flex flex-col gap-3">

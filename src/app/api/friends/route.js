@@ -1,0 +1,236 @@
+import { NextResponse } from 'next/server';
+
+export const dynamic = 'force-dynamic';
+
+const CLOUD_FRIENDS_BIN = 'https://extendsclass.com/api/json-storage/bin/ddaeeaf';
+const CLOUD_USERS_BIN = 'https://extendsclass.com/api/json-storage/bin/fccfdcb';
+
+if (!global._synctune_friends_cache) {
+  global._synctune_friends_cache = {
+    data: null,
+    lastFetched: 0
+  };
+}
+
+async function getFriendsData(forceFresh = false) {
+  const cache = global._synctune_friends_cache;
+  const now = Date.now();
+  if (!forceFresh && cache.data && (now - cache.lastFetched < 3000)) {
+    return cache.data;
+  }
+
+  try {
+    const res = await fetch(`${CLOUD_FRIENDS_BIN}?_t=${now}`, {
+      headers: { 'Accept': 'application/json' },
+      cache: 'no-store'
+    });
+    if (res.ok) {
+      const data = await res.json();
+      cache.data = {
+        friendships: Array.isArray(data.friendships) ? data.friendships : [],
+        friendRequests: Array.isArray(data.friendRequests) ? data.friendRequests : []
+      };
+      cache.lastFetched = now;
+      return cache.data;
+    }
+  } catch (e) {
+    console.warn('Friends cloud fetch deferred:', e.message);
+  }
+
+  return cache.data || { friendships: [], friendRequests: [] };
+}
+
+async function saveFriendsData(data) {
+  const cache = global._synctune_friends_cache;
+  cache.data = data;
+  cache.lastFetched = Date.now();
+
+  try {
+    await fetch(CLOUD_FRIENDS_BIN, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+  } catch (e) {
+    console.warn('Friends cloud save deferred:', e.message);
+  }
+  return true;
+}
+
+export async function GET(request) {
+  const { searchParams } = new URL(request.url);
+  const userId = searchParams.get('userId');
+
+  if (!userId) {
+    return NextResponse.json({ success: true, friends: [], requests: [] });
+  }
+
+  const { friendships, friendRequests } = await getFriendsData(true);
+
+  // Find all friends connected to this user (matches user1 or user2 by id or email)
+  const normalizedId = String(userId).toLowerCase();
+  const userFriendIds = friendships
+    .filter((f) => String(f.user1).toLowerCase() === normalizedId || String(f.user2).toLowerCase() === normalizedId)
+    .map((f) => (String(f.user1).toLowerCase() === normalizedId ? f.user2 : f.user1));
+
+  // Incoming friend requests for this user
+  const incoming = friendRequests.filter((r) => String(r.toUserId).toLowerCase() === normalizedId && r.status === 'pending');
+
+  // Load user details from cloud users
+  let allUsers = [];
+  try {
+    const uRes = await fetch(`${CLOUD_USERS_BIN}?_t=${Date.now()}`, { cache: 'no-store' });
+    if (uRes.ok) {
+      const uData = await uRes.json();
+      allUsers = uData.users || [];
+    }
+  } catch (e) {}
+
+  // Active rooms from memory to show what friends are listening to
+  const activeRooms = global._synctune_rooms || {};
+
+  const friendList = userFriendIds.map((fId) => {
+    const targetKey = String(fId).toLowerCase();
+    const u = allUsers.find((x) => String(x.id).toLowerCase() === targetKey || (x.email && x.email.toLowerCase() === targetKey)) || {
+      id: fId,
+      username: 'Friend',
+      email: ''
+    };
+
+    // Check if this friend is active in any room
+    let activeRoomCode = null;
+    let roomSong = null;
+    for (const [code, room] of Object.entries(activeRooms)) {
+      if ((room.members || []).some((m) => String(m.id).toLowerCase() === targetKey || (m.username && m.username.toLowerCase() === u.username.toLowerCase()))) {
+        activeRoomCode = code;
+        roomSong = room.currentSong;
+        break;
+      }
+    }
+
+    return {
+      id: u.id,
+      name: u.username,
+      email: u.email,
+      is_online: Boolean(activeRoomCode) || Boolean(u.lastSeen && (Date.now() - u.lastSeen < 120000)),
+      status: activeRoomCode ? 'listening' : 'active',
+      active_room: activeRoomCode,
+      currentSong: roomSong
+    };
+  });
+
+  return NextResponse.json({
+    success: true,
+    friends: friendList,
+    requests: incoming
+  });
+}
+
+export async function POST(request) {
+  try {
+    const body = await request.json().catch(() => ({}));
+    const action = (body.action || 'add').toLowerCase();
+    const currentUserId = body.userId;
+    const currentUser = body.user || { id: currentUserId, username: 'Listener' };
+
+    if (!currentUserId) {
+      return NextResponse.json({ success: false, error: 'User ID is required.' }, { status: 400 });
+    }
+
+    const data = await getFriendsData(true);
+
+    // 1. Send Friend Request / Connect Directly
+    if (action === 'send_request') {
+      const targetQuery = (body.query || '').trim().toLowerCase();
+      if (!targetQuery) {
+        return NextResponse.json({ success: false, error: 'Please enter a username or email.' }, { status: 400 });
+      }
+
+      // Find target user from cloud users
+      let allUsers = [];
+      try {
+        const uRes = await fetch(`${CLOUD_USERS_BIN}?_t=${Date.now()}`, { cache: 'no-store' });
+        if (uRes.ok) {
+          const uData = await uRes.json();
+          allUsers = uData.users || [];
+        }
+      } catch (e) {}
+
+      const currentKey = String(currentUserId).toLowerCase();
+      const target = allUsers.find((u) => {
+        const matchName = u.username && u.username.toLowerCase() === targetQuery;
+        const matchEmail = u.email && u.email.toLowerCase() === targetQuery;
+        const isNotSelf = String(u.id).toLowerCase() !== currentKey && (u.email ? u.email.toLowerCase() !== currentKey : true);
+        return (matchName || matchEmail) && isNotSelf;
+      });
+
+      if (!target) {
+        return NextResponse.json({
+          success: false,
+          error: 'No SyncTune account found with that username or email.'
+        }, { status: 404 });
+      }
+
+      // Check if already friends
+      const isAlreadyFriend = data.friendships.some((f) => {
+        const u1 = String(f.user1).toLowerCase();
+        const u2 = String(f.user2).toLowerCase();
+        const me = currentKey;
+        const themId = String(target.id).toLowerCase();
+        const themEmail = (target.email || '').toLowerCase();
+        return (
+          (u1 === me && (u2 === themId || u2 === themEmail)) ||
+          (u2 === me && (u1 === themId || u1 === themEmail))
+        );
+      });
+
+      if (isAlreadyFriend) {
+        return NextResponse.json({ success: false, error: 'You are already connected as friends.' }, { status: 400 });
+      }
+
+      // Add friendship directly
+      data.friendships.push({
+        id: `f_${Date.now()}`,
+        user1: currentUserId,
+        user2: target.id,
+        createdAt: new Date().toISOString()
+      });
+
+      await saveFriendsData(data);
+
+      return NextResponse.json({
+        success: true,
+        message: `Connected with ${target.username} successfully!`,
+        friend: {
+          id: target.id,
+          name: target.username,
+          email: target.email,
+          is_online: true,
+          status: 'active',
+          active_room: null
+        }
+      });
+    }
+
+    // 2. Remove Friend
+    if (action === 'remove_friend') {
+      const friendId = String(body.friendId).toLowerCase();
+      const currentKey = String(currentUserId).toLowerCase();
+      data.friendships = data.friendships.filter((f) => {
+        const u1 = String(f.user1).toLowerCase();
+        const u2 = String(f.user2).toLowerCase();
+        const match =
+          (u1 === currentKey && u2 === friendId) ||
+          (u2 === currentKey && u1 === friendId);
+        return !match;
+      });
+      await saveFriendsData(data);
+      return NextResponse.json({ success: true, message: 'Friend removed.' });
+    }
+
+    return NextResponse.json({ success: false, error: 'Unknown action.' }, { status: 400 });
+  } catch (err) {
+    console.error('Friends API Error:', err);
+    return NextResponse.json({ success: false, error: 'Internal server error.' }, { status: 500 });
+  }
+}

@@ -146,7 +146,6 @@ export default function DashboardView({
 
       {/* 2. Welcome Hero Card */}
       <div className="p-6 rounded-2xl bg-[#0F1626] border border-white/5 flex flex-col md:flex-row items-start md:items-center justify-between gap-6 shadow-xl relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-80 h-80 bg-emerald-500/5 rounded-full blur-3xl pointer-events-none" />
 
         <div className="flex flex-col gap-1.5 min-w-0 z-10">
           <div className="flex items-center gap-2">
