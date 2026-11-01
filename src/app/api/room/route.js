@@ -41,6 +41,16 @@ function generateUniqueCode() {
   return `SYNC${num}`;
 }
 
+function getISTTimestamp() {
+  return new Intl.DateTimeFormat('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true
+  }).format(new Date());
+}
+
 function getVoteScore(v) {
   if (Array.isArray(v)) return v.length;
   if (typeof v === 'number') return v;
@@ -325,6 +335,7 @@ export async function POST(request) {
       }
 
       const allowListenerControl = body.allowListenerControl !== undefined ? Boolean(body.allowListenerControl) : true;
+      const initialQueue = (Array.isArray(body.queue) && body.queue.length > 0) ? body.queue : [...DEFAULT_ROOM_QUEUE];
 
       const newRoom = {
         code: roomCode,
@@ -340,8 +351,16 @@ export async function POST(request) {
         lastUpdated: Date.now(),
         version: 1,
         lastEvent: null,
-        chats: [],
-        queue: [...DEFAULT_ROOM_QUEUE],
+        chats: [
+          {
+            id: `sys_create_${Date.now()}`,
+            sender: 'System',
+            isSystem: true,
+            message: `🎉 Room created by ${user.username || 'Host'}`,
+            timestamp: getISTTimestamp()
+          }
+        ],
+        queue: initialQueue,
         queueVotes: {}
       };
 
@@ -368,14 +387,49 @@ export async function POST(request) {
 
     // 2. JOIN ROOM
     if (action === 'join') {
-      const existingMember = room.members.find((m) => String(m.id) === String(user.id));
+      if (!room.members) room.members = [];
+      const currentUserId = String(user.id);
+      const currentUserName = String(user.username || 'Listener');
+
+      const existingMember = room.members.find(
+        (m) => String(m.id) === currentUserId || (m.username && m.username.toLowerCase() === currentUserName.toLowerCase())
+      );
+
+      const isRoomHost = String(user.id) === String(room.host_id);
+
       if (!existingMember) {
         room.members.push({
           id: user.id,
-          username: user.username,
-          isHost: String(user.id) === String(room.host_id),
+          username: user.username || 'Listener',
+          isHost: isRoomHost,
           isOnline: true
         });
+
+        // Add system message to room chat with IST timestamp
+        if (!room.chats) room.chats = [];
+        const joinChat = {
+          id: `sys_join_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          sender: 'System',
+          isSystem: true,
+          message: `👋 ${user.username || 'A listener'} joined the room`,
+          timestamp: getISTTimestamp()
+        };
+        room.chats.push(joinChat);
+        if (room.chats.length > 50) room.chats.shift();
+
+        room.version = (room.version || 0) + 1;
+        room.lastEvent = {
+          type: 'MEMBER_JOINED',
+          user: { id: user.id, username: user.username },
+          members: room.members,
+          chat: joinChat,
+          version: room.version
+        };
+
+        notifyRoomListeners(room);
+        await syncRoomToCloud(room);
+      } else {
+        existingMember.isOnline = true;
       }
 
       return NextResponse.json({
@@ -412,11 +466,12 @@ export async function POST(request) {
           song: body.song,
           time: room.currentTime,
           version: room.version,
-          triggeredBy: user.username || 'Host'
+          triggeredBy: user.username || 'Host',
+          triggeredById: String(user.id || '')
         };
 
         notifyRoomListeners(room);
-        syncRoomToCloud(room);
+        await syncRoomToCloud(room);
         return NextResponse.json({ success: true, room: getSanitizedRoom(room) });
       }
     }
@@ -436,11 +491,12 @@ export async function POST(request) {
         type: 'PAUSE',
         time: room.currentTime,
         version: room.version,
-        triggeredBy: user.username || 'Host'
+        triggeredBy: user.username || 'Host',
+        triggeredById: String(user.id || '')
       };
 
-      notifyRoomListeners(room);
-      syncRoomToCloud(room);
+        notifyRoomListeners(room);
+        await syncRoomToCloud(room);
       return NextResponse.json({ success: true, room: getSanitizedRoom(room) });
     }
 
@@ -459,11 +515,12 @@ export async function POST(request) {
         type: 'PLAY',
         time: room.currentTime,
         version: room.version,
-        triggeredBy: user.username || 'Host'
+        triggeredBy: user.username || 'Host',
+        triggeredById: String(user.id || '')
       };
 
       notifyRoomListeners(room);
-      syncRoomToCloud(room);
+      await syncRoomToCloud(room);
       return NextResponse.json({ success: true, room: getSanitizedRoom(room) });
     }
 
@@ -478,8 +535,9 @@ export async function POST(request) {
       room.lastEvent = {
         type: 'SEEK',
         time: room.currentTime,
-        version: room.version,
-        triggeredBy: user.username || 'Host'
+        triggeredBy: user.username || 'Host',
+        triggeredById: String(user.id || ''),
+        version: room.version
       };
 
       notifyRoomListeners(room);
@@ -581,7 +639,7 @@ export async function POST(request) {
       }
     }
 
-    // 11. CHAT MESSAGE IN ROOM
+    // 11. CHAT MESSAGE IN ROOM (Real-time broadcast & cloud persistent)
     if (action === 'chat') {
       if (body.message) {
         if (!room.chats) room.chats = [];
@@ -589,10 +647,21 @@ export async function POST(request) {
           id: String(Date.now()) + '_' + Math.random().toString(36).substring(2, 6),
           sender: user.username || body.username || 'Listener',
           message: body.message,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          timestamp: getISTTimestamp()
         };
         room.chats.push(chatItem);
         if (room.chats.length > 50) room.chats.shift();
+
+        room.version = (room.version || 0) + 1;
+        room.lastEvent = {
+          type: 'CHAT',
+          chat: chatItem,
+          chats: room.chats,
+          version: room.version
+        };
+
+        notifyRoomListeners(room);
+        await syncRoomToCloud(room);
         return NextResponse.json({ success: true, chat: chatItem, chats: room.chats });
       }
     }
@@ -601,20 +670,40 @@ export async function POST(request) {
     if (action === 'leave') {
       const currentUserId = String(user.id).toLowerCase();
       const currentUserName = String(user.username || '').toLowerCase();
+      const leavingMember = (room.members || []).find(
+        (m) => String(m.id).toLowerCase() === currentUserId || String(m.username).toLowerCase() === currentUserName
+      );
+
       room.members = (room.members || []).filter(
         (m) => String(m.id).toLowerCase() !== currentUserId && String(m.username).toLowerCase() !== currentUserName
       );
+
       if (room.members.length === 0) {
         delete roomsStore[code];
+      } else {
+        if (!room.chats) room.chats = [];
+        const leaveChat = {
+          id: `sys_leave_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          sender: 'System',
+          isSystem: true,
+          message: `🚪 ${leavingMember?.username || user.username || 'A listener'} left the room`,
+          timestamp: getISTTimestamp()
+        };
+        room.chats.push(leaveChat);
+        if (room.chats.length > 50) room.chats.shift();
+
+        room.version = (room.version || 0) + 1;
+        room.lastEvent = {
+          type: 'MEMBER_LEFT',
+          userId: user.id,
+          username: user.username,
+          members: room.members,
+          chat: leaveChat,
+          version: room.version
+        };
+        notifyRoomListeners(room);
       }
-      room.version = (room.version || 0) + 1;
-      room.lastEvent = {
-        type: 'MEMBER_LEFT',
-        userId: user.id,
-        username: user.username,
-        version: room.version
-      };
-      notifyRoomListeners(room);
+
       await syncRoomToCloud(room);
       return NextResponse.json({ success: true });
     }

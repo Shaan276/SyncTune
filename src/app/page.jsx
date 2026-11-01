@@ -90,6 +90,8 @@ export default function Home() {
   const canControlMusic = !activeRoom || !activeRoomMeta || activeRoomMeta.allowListenerControl !== false || isRoomHost;
   const canControlMusicRef = useRef(canControlMusic);
   canControlMusicRef.current = canControlMusic;
+  const isRoomHostRef = useRef(isRoomHost);
+  isRoomHostRef.current = isRoomHost;
 
   const handleSetActiveRoom = useCallback((roomCode) => {
     if (roomCode !== activeRoomRef.current) {
@@ -401,6 +403,8 @@ export default function Home() {
       ch.onmessage = (event) => {
         const msg = event.data;
         if (!msg || !msg.type) return;
+        const currentUserId = String(userRef.current?.id || '');
+        if (msg.senderId && String(msg.senderId) === currentUserId) return; // skip self echo
 
         if (msg.type === 'PLAY_SONG' && msg.song) {
           if (!currentSongRef.current || currentSongRef.current.id !== msg.song.id) {
@@ -498,29 +502,39 @@ export default function Home() {
           // Handle server-triggered event ping instantly
           if (data.hasUpdate && data.event) {
             const ev = data.event;
+            const currentUserId = String(userRef.current?.id || '');
+            const currentUserName = String(userRef.current?.username || '').toLowerCase();
+            const isSelfTriggered = Boolean(
+              (ev.triggeredById && String(ev.triggeredById) === currentUserId) ||
+              (ev.triggeredBy && String(ev.triggeredBy).toLowerCase() === currentUserName)
+            );
 
             if (ev.type === 'PAUSE') {
               setIsPlaying(false);
               window.syncTunePauseAudio?.();
-              if (typeof ev.time === 'number') {
+              if (typeof ev.time === 'number' && !isSelfTriggered) {
                 setCurrentTime(ev.time);
                 window.syncTuneSeekAudio?.(ev.time);
               }
             } else if (ev.type === 'PLAY') {
               setIsPlaying(true);
               window.syncTunePlayAudio?.();
-              if (typeof ev.time === 'number') {
+              if (typeof ev.time === 'number' && !isSelfTriggered) {
                 setCurrentTime(ev.time);
                 window.syncTuneSeekAudio?.(ev.time);
               }
             } else if (ev.type === 'SEEK' && typeof ev.time === 'number') {
-              // Timeline scrub / seek event (e.g. 1:25 -> 3:27)
-              setCurrentTime(ev.time);
-              window.syncTuneSeekAudio?.(ev.time);
+              // Avoid echoing seek if self-triggered to prevent slider jerking
+              if (!isSelfTriggered) {
+                setCurrentTime(ev.time);
+                window.syncTuneSeekAudio?.(ev.time);
+              }
             } else if (ev.type === 'TRACK_CHANGE' && ev.song) {
-              handlePlaySong(ev.song, true);
-              if (typeof ev.time === 'number' && ev.time > 0) {
-                setTimeout(() => window.syncTuneSeekAudio?.(ev.time), 350);
+              if (!isSelfTriggered || !currentSongRef.current || currentSongRef.current.id !== ev.song.id) {
+                handlePlaySong(ev.song, true);
+                if (typeof ev.time === 'number' && ev.time > 0) {
+                  setTimeout(() => window.syncTuneSeekAudio?.(ev.time), 350);
+                }
               }
             }
           }
@@ -626,6 +640,18 @@ export default function Home() {
       });
     }
   }, [handlePlaySong]);
+
+  const handleAutoTrackEnd = useCallback(() => {
+    // In a room, only the room host triggers auto-skip when a track completes
+    // to prevent all listeners from firing simultaneous 'next' calls!
+    if (activeRoomRef.current) {
+      if (isRoomHostRef.current) {
+        handleSkipNext();
+      }
+    } else {
+      handleSkipNext();
+    }
+  }, [handleSkipNext]);
 
   const handleSkipPrev = useCallback(() => {
     if (activeRoomRef.current && !canControlMusicRef.current) return;
@@ -1000,10 +1026,10 @@ export default function Home() {
           const currentT = Math.floor(time);
           setCurrentTime(currentT);
           if (duration > 0 && currentT >= duration + 1) {
-            handleSkipNext();
+            handleAutoTrackEnd();
           }
         }}
-        onEnded={handleSkipNext}
+        onEnded={handleAutoTrackEnd}
         onPlay={handleDirectPlay}
         onPause={handleDirectPause}
         onTogglePlay={handleTogglePlay}

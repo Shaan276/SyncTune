@@ -1,7 +1,30 @@
 'use client';
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { Radio, Plus, MessageSquare, ThumbsUp, Users, Play, LogOut, Search, Sparkles, Zap, ArrowRight, Copy, Check, Lock, Crown, Shield, Music2 } from 'lucide-react';
-import { searchYouTube, fetchLiveRecommendations, formatTime } from '../../lib/youtube';
+import { Radio, Plus, MessageSquare, ThumbsUp, Users, Play, LogOut, Search, Sparkles, Zap, ArrowRight, Copy, Check, Lock, Crown, Shield, Music2, RefreshCw } from 'lucide-react';
+import { searchYouTube, fetchLiveRecommendations, getUserRecommendations, formatTime } from '../../lib/youtube';
+
+export function getISTTimestamp() {
+  return new Intl.DateTimeFormat('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true
+  }).format(new Date());
+}
+
+export function getCleanVoteCount(votesData) {
+  if (Array.isArray(votesData)) return votesData.length;
+  if (typeof votesData === 'number') return votesData;
+  if (typeof votesData === 'string') {
+    if (/^\d+$/.test(votesData)) {
+      const parsed = parseInt(votesData, 10);
+      return parsed > 100000 ? 1 : parsed;
+    }
+    return 1;
+  }
+  return votesData ? 1 : 0;
+}
 
 // Curated high-energy predefined queue so the room is never empty
 const DEFAULT_ROOM_QUEUE = [
@@ -248,11 +271,20 @@ export default function RoomsView({
   // Sync real-time updates from parent long-polling ping (Zero polling lag)
   useEffect(() => {
     if (!activeRoomMeta) return;
-    if (activeRoomMeta.members) setMembers(activeRoomMeta.members);
+    if (activeRoomMeta.members && Array.isArray(activeRoomMeta.members)) {
+      setMembers(activeRoomMeta.members);
+    }
     if (activeRoomMeta.host_name) setRoomHost(activeRoomMeta.host_name);
     if (activeRoomMeta.host_id) setRoomHostId(activeRoomMeta.host_id);
     if (activeRoomMeta.allowListenerControl !== undefined) {
       setRoomAllowListenerControl(activeRoomMeta.allowListenerControl !== false);
+    }
+    if (activeRoomMeta.chats && Array.isArray(activeRoomMeta.chats)) {
+      setChats((prev) => {
+        const remoteIds = new Set(activeRoomMeta.chats.map((c) => String(c.id)));
+        const localPending = prev.filter((c) => c.isLocal && !remoteIds.has(String(c.id)));
+        return [...activeRoomMeta.chats, ...localPending];
+      });
     }
     if (activeRoomMeta.queueVotes) {
       setQueueVotes((prev) => {
@@ -277,7 +309,36 @@ export default function RoomsView({
     return () => clearInterval(pollTimer);
   }, [activeRoom, syncRoomState]);
 
-  // 2. Create Room Handler (Always Private, instant 0ms response, code like SYNC1962)
+  // Dynamic Room Recommendations below queue (Refreshed based on Host / Vibe)
+  const [roomRecommendationsBelow, setRoomRecommendationsBelow] = useState([]);
+  const [isRefreshingRecs, setIsRefreshingRecs] = useState(false);
+
+  const handleRefreshRecommendations = useCallback(async () => {
+    setIsRefreshingRecs(true);
+    try {
+      const seed = currentSong || { artist: 'Ed Sheeran', title: 'Perfect' };
+      const res = await fetchLiveRecommendations(seed, true);
+      const pool = [...(res.genreTracks || []), ...(res.artistTracks || [])]
+        .filter((s) => (s.duration || 210) <= 600);
+      if (pool.length > 0) {
+        setRoomRecommendationsBelow(pool.sort(() => 0.5 - Math.random()).slice(0, 8));
+      } else {
+        const personal = getUserRecommendations();
+        if (personal && personal.length > 0) {
+          setRoomRecommendationsBelow(personal.sort(() => 0.5 - Math.random()).slice(0, 8));
+        }
+      }
+    } catch (e) {
+    } finally {
+      setIsRefreshingRecs(false);
+    }
+  }, [currentSong]);
+
+  useEffect(() => {
+    handleRefreshRecommendations();
+  }, [currentSong?.id]);
+
+  // 2. Create Room Handler (Initialized with Host Personal Recommendations)
   const handleCreateNewRoom = async () => {
     // Stop any currently playing solo song immediately!
     if (typeof window !== 'undefined' && window.syncTunePauseAudio) {
@@ -290,14 +351,28 @@ export default function RoomsView({
     const stableUser = getStableUser(user);
     const generatedCode = 'SYNC' + Math.floor(1000 + Math.random() * 9000);
 
+    // Host personal recommendation queue:
+    const hostPersonalRecs = getUserRecommendations();
+    const initialQueue = (hostPersonalRecs && hostPersonalRecs.length >= 3)
+      ? hostPersonalRecs.slice(0, 10)
+      : DEFAULT_ROOM_QUEUE;
+
     // Instant 0ms transition into room UI
     setActiveRoom(generatedCode);
     setRoomHost(stableUser.username || 'Host');
     setRoomHostId(stableUser.id);
     setRoomAllowListenerControl(allowListenerControl);
     setMembers([{ id: stableUser.id, username: stableUser.username, isHost: true }]);
-    setRoomRecommendations(DEFAULT_ROOM_QUEUE);
-    setChats([]);
+    setRoomRecommendations(initialQueue);
+    setChats([
+      {
+        id: `sys_create_${Date.now()}`,
+        sender: 'System',
+        isSystem: true,
+        message: `🎉 Room created by ${stableUser.username || 'Host'}`,
+        timestamp: getISTTimestamp()
+      }
+    ]);
     setQueueVotes({});
 
     try {
@@ -309,7 +384,8 @@ export default function RoomsView({
           code: generatedCode,
           user: stableUser,
           isPrivate: true,
-          allowListenerControl: allowListenerControl
+          allowListenerControl: allowListenerControl,
+          queue: initialQueue
         })
       });
 
@@ -547,7 +623,7 @@ export default function RoomsView({
       id: tempId,
       sender: stableUser.username || 'Listener',
       message: msg,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      timestamp: getISTTimestamp(),
       isLocal: true
     };
 
@@ -679,15 +755,9 @@ export default function RoomsView({
   // Queue is dynamically sorted by collective votes, memoized to prevent re-rendering/flickering
   const sortedRecommendations = useMemo(() => {
     const activeQueueList = roomRecommendations && roomRecommendations.length > 0 ? roomRecommendations : DEFAULT_ROOM_QUEUE;
-    const getCount = (songId) => {
-      const v = queueVotes[songId];
-      if (Array.isArray(v)) return v.length;
-      if (typeof v === 'number') return v;
-      return v ? 1 : 0;
-    };
     return [...activeQueueList].sort((a, b) => {
-      const votesA = getCount(a.id);
-      const votesB = getCount(b.id);
+      const votesA = getCleanVoteCount(queueVotes[a.id]);
+      const votesB = getCleanVoteCount(queueVotes[b.id]);
       return votesB - votesA;
     });
   }, [roomRecommendations, queueVotes]);
@@ -976,15 +1046,13 @@ export default function RoomsView({
                 <div className="flex flex-col gap-2">
                   {sortedRecommendations.map((song, idx) => {
                     const votesData = queueVotes[song.id];
-                    const voteCount = Array.isArray(votesData)
-                      ? votesData.length
-                      : (typeof votesData === 'number' ? votesData : (votesData ? 1 : 0));
+                    const voteCount = getCleanVoteCount(votesData);
                     const currentVoterId = String(user?.id || user?.email || user?.username || '');
                     const hasUserVoted = Array.isArray(votesData) && currentVoterId && (
-                      votesData.includes(currentVoterId) ||
-                      votesData.includes(String(user?.id)) ||
-                      votesData.includes(String(user?.email || '').toLowerCase()) ||
-                      votesData.includes(String(user?.username || '').toLowerCase())
+                      votesData.some((v) => String(v).toLowerCase() === currentVoterId.toLowerCase()) ||
+                      votesData.some((v) => user?.id && String(v) === String(user.id)) ||
+                      votesData.some((v) => user?.email && String(v).toLowerCase() === user.email.toLowerCase()) ||
+                      votesData.some((v) => user?.username && String(v).toLowerCase() === user.username.toLowerCase())
                     );
 
                     return (
@@ -1045,6 +1113,80 @@ export default function RoomsView({
                   })}
                 </div>
               </div>
+
+              {/* Dynamic Room Recommendations (Refreshed based on Host / Vibe) */}
+              <div className="flex flex-col gap-3 min-w-0 pt-2 border-t border-white/5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                    <h4 className="text-xs font-bold text-zinc-300 uppercase tracking-wider">
+                      Recommended For This Room
+                    </h4>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleRefreshRecommendations}
+                    disabled={isRefreshingRecs}
+                    className="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white text-[11px] font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${isRefreshingRecs ? 'animate-spin text-cyan-400' : ''}`} />
+                    <span>{isRefreshingRecs ? 'Refreshing...' : 'Refresh'}</span>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {roomRecommendationsBelow.length === 0 ? (
+                    <div className="col-span-full py-4 text-center text-xs text-zinc-500">
+                      Loading room recommendations...
+                    </div>
+                  ) : (
+                    roomRecommendationsBelow.map((song) => (
+                      <div
+                        key={song.id}
+                        className="p-2.5 rounded-xl bg-[#080C14] border border-white/5 flex items-center justify-between gap-2.5 hover:border-cyan-500/30 transition-all min-w-0"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                          <img
+                            src={song.thumbnail}
+                            alt={song.title}
+                            className="w-9 h-9 rounded-lg object-cover shrink-0"
+                          />
+                          <div className="flex flex-col min-w-0 flex-1">
+                            <span className="text-xs font-bold text-white truncate">{song.title}</span>
+                            <span className="text-[11px] text-zinc-400 truncate">
+                              {song.artist} • {formatTime(song.duration)}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => handleAddToRoomQueue(song)}
+                            className="p-1.5 rounded-lg bg-white/5 hover:bg-emerald-500/20 text-zinc-300 hover:text-emerald-400 transition-colors cursor-pointer"
+                            title="Add to Upcoming Queue"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={!canControlMusic}
+                            onClick={() => handlePlaySongInRoom(song)}
+                            className={`p-1.5 rounded-lg transition-colors ${
+                              canControlMusic
+                                ? 'bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 cursor-pointer'
+                                : 'bg-white/5 text-zinc-500 cursor-not-allowed opacity-50'
+                            }`}
+                            title={canControlMusic ? 'Play Now in Room' : 'Host Only'}
+                          >
+                            <Play className="w-3.5 h-3.5 fill-current ml-0.5" />
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
             </div>
 
             {/* Room Sidebar: Members & Live Chat */}
@@ -1094,20 +1236,33 @@ export default function RoomsView({
                       No messages yet. Say hello to everyone!
                     </div>
                   ) : (
-                    chats.map((c) => (
-                      <div
-                        key={c.id || Math.random()}
-                        className="p-2 rounded-lg bg-white/5 flex flex-col gap-0.5 text-xs"
-                      >
-                        <div className="flex items-center justify-between text-[10px]">
-                          <span className="font-bold text-emerald-400">
-                            {c.sender || c.username || 'Listener'}
-                          </span>
-                          <span className="text-zinc-500 font-mono">{c.timestamp || c.time || ''}</span>
+                    chats.map((c) => {
+                      if (c.isSystem) {
+                        return (
+                          <div
+                            key={c.id || Math.random()}
+                            className="py-1 px-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-between text-[11px] text-emerald-300"
+                          >
+                            <span className="font-semibold">{c.message}</span>
+                            <span className="text-[10px] text-emerald-500/70 font-mono ml-2 shrink-0">{c.timestamp} (IST)</span>
+                          </div>
+                        );
+                      }
+                      return (
+                        <div
+                          key={c.id || Math.random()}
+                          className="p-2 rounded-lg bg-white/5 flex flex-col gap-0.5 text-xs"
+                        >
+                          <div className="flex items-center justify-between text-[10px]">
+                            <span className="font-bold text-emerald-400">
+                              {c.sender || c.username || 'Listener'}
+                            </span>
+                            <span className="text-zinc-500 font-mono">{c.timestamp || c.time || ''}</span>
+                          </div>
+                          <span className="text-white break-words">{c.message}</span>
                         </div>
-                        <span className="text-white break-words">{c.message}</span>
-                      </div>
-                    ))
+                      );
+                    })
                   )}
                   <div ref={chatBottomRef} />
                 </div>
