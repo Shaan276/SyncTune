@@ -267,11 +267,36 @@ export async function GET(request) {
       searchYouTubeFast(ytSearchQuery, maxDurationSeconds)
     ]);
 
-    // Merge results with Saavn high-quality audio prioritized and YouTube adding extra tracks
+    // Relevance scoring: ensure songs that accurately match the user's search query in title/artist rank at the top
+    const scoreSong = (song) => {
+      const qLower = query.toLowerCase().trim();
+      const qTerms = qLower.split(/\s+/).filter(Boolean);
+      const title = (song.title || '').toLowerCase();
+      const artist = (song.artist || '').toLowerCase();
+
+      let score = 0;
+      if (title === qLower) score += 200;
+      else if (title.startsWith(qLower)) score += 150;
+      else if (title.includes(qLower)) score += 100;
+      else {
+        const matchesInTitle = qTerms.filter(t => title.includes(t)).length;
+        score += matchesInTitle * 25;
+        if (matchesInTitle === 0) score -= 100; // Penalize if no query word appears in title
+      }
+
+      if (artist.includes(qLower)) score += 40;
+      if (song.audioUrl) score += 10; // Boost high-speed CDN stream when title is relevant
+      return score;
+    };
+
+    const allCandidates = [...saavnResults, ...ytResults];
+    const filteredCandidates = allCandidates.filter(s => scoreSong(s) > -50);
+    filteredCandidates.sort((a, b) => scoreSong(b) - scoreSong(a));
+
     const combined = [];
     const seenTitles = new Set();
 
-    for (const song of [...saavnResults, ...ytResults]) {
+    for (const song of (filteredCandidates.length > 0 ? filteredCandidates : allCandidates)) {
       const norm = (song.title || '').toLowerCase().replace(/[^a-z0-9]/g, '');
       if (norm && !seenTitles.has(norm)) {
         seenTitles.add(norm);

@@ -134,6 +134,7 @@ export default function YouTubeAudioEngine({
         playerRef.current.setVolume(Math.floor(volume * 100));
         if (isPlayingRef.current) {
           playerRef.current.loadVideoById(songId, 0);
+          playerRef.current.unMute();
           playerRef.current.playVideo();
         } else {
           playerRef.current.cueVideoById(songId, 0);
@@ -337,11 +338,11 @@ export default function YouTubeAudioEngine({
       if (!el) return;
 
       playerRef.current = new window.YT.Player('synctune-ultra-low-audio-engine', {
-        height: '200',
-        width: '200',
-        videoId: currentSong?.id || '7wtfhZwyrcc',
+        height: '240',
+        width: '320',
+        videoId: currentSong?.id || '',
         playerVars: {
-          autoplay: 0,
+          autoplay: 1,
           enablejsapi: 1,
           controls: 0,
           disablekb: 1,
@@ -350,6 +351,7 @@ export default function YouTubeAudioEngine({
           showinfo: 0,
           modestbranding: 1,
           playsinline: 1,
+          suggestedQuality: 'small',
           origin: typeof window !== 'undefined' ? window.location.origin : ''
         },
         events: {
@@ -371,6 +373,7 @@ export default function YouTubeAudioEngine({
               if (songToLoad) {
                 if (isPlayingRef.current) {
                   event.target.loadVideoById(songToLoad, 0);
+                  event.target.unMute();
                   event.target.playVideo();
                 } else {
                   event.target.cueVideoById(songToLoad, 0);
@@ -389,12 +392,26 @@ export default function YouTubeAudioEngine({
           },
           onStateChange: (event) => {
             if (event.data === window.YT.PlayerState.PLAYING) {
+              try {
+                event.target.unMute();
+                event.target.setVolume(Math.floor(volume * 100));
+              } catch (e) {}
               if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
                 navigator.mediaSession.playbackState = 'playing';
                 updatePositionState();
               }
             } else if (event.data === window.YT.PlayerState.PAUSED) {
-              if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
+              if (isPlayingRef.current) {
+                // Instantly re-assert playback so music doesn't stop on browser backgrounding
+                setTimeout(() => {
+                  try {
+                    if (isPlayingRef.current && playerRef.current) {
+                      playerRef.current.unMute();
+                      playerRef.current.playVideo();
+                    }
+                  } catch (e) {}
+                }, 50);
+              } else if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
                 navigator.mediaSession.playbackState = 'paused';
               }
             } else if (event.data === window.YT.PlayerState.ENDED) {
@@ -560,15 +577,28 @@ export default function YouTubeAudioEngine({
   // 7. Time tracking for iframe fallback (native audio uses onTimeUpdate event directly)
   useEffect(() => {
     let interval;
-    if (isPlaying && useIframeFallback) {
+    if (isPlaying) {
       interval = setInterval(() => {
         if (playerRef.current && isReadyRef.current && typeof playerRef.current.getCurrentTime === 'function') {
           try {
             const time = playerRef.current.getCurrentTime();
-            if (onTimeUpdateRef.current && !isNaN(time)) {
+            if (useIframeFallback && onTimeUpdateRef.current && !isNaN(time)) {
               onTimeUpdateRef.current(time);
               if (isPlayingRef.current) {
                 updatePositionState(time);
+              }
+            }
+
+            // Auto-resume if mobile OS or browser attempted to pause or mute in background
+            if (isPlayingRef.current) {
+              const state = playerRef.current.getPlayerState();
+              if (state === 2) {
+                // State 2 is PAUSED
+                playerRef.current.unMute();
+                playerRef.current.playVideo();
+              } else if (state === 1 && typeof playerRef.current.isMuted === 'function' && playerRef.current.isMuted()) {
+                playerRef.current.unMute();
+                playerRef.current.setVolume(Math.floor(volume * 100));
               }
             }
           } catch (e) {}
@@ -576,7 +606,7 @@ export default function YouTubeAudioEngine({
       }, 500);
     }
     return () => clearInterval(interval);
-  }, [isPlaying, useIframeFallback]);
+  }, [isPlaying, useIframeFallback, volume]);
 
   return (
     <>
@@ -662,18 +692,19 @@ export default function YouTubeAudioEngine({
         style={{ display: 'none' }}
       />
 
-      {/* Pre-warmed YouTube Engine container (active in viewport to prevent Chrome offscreen autoplay suspension) */}
+      {/* High-fidelity YouTube Engine container: standard 320x240 geometry with scale(0.001) and zIndex: 1 to ensure browser unmuted autoplay authorization */}
       <div
+        id="synctune-yt-wrapper"
         style={{
           position: 'fixed',
           bottom: 0,
           right: 0,
-          width: '200px',
-          height: '200px',
-          opacity: 0.001,
+          width: '320px',
+          height: '240px',
+          transform: 'scale(0.001)',
+          transformOrigin: 'bottom right',
           pointerEvents: 'none',
-          zIndex: -1,
-          overflow: 'hidden'
+          zIndex: 1
         }}
       >
         <div id="synctune-ultra-low-audio-engine" />
