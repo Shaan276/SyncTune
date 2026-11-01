@@ -1,8 +1,8 @@
 'use client';
 import React, { useEffect, useRef, useState } from 'react';
 
-// 44-byte silent WAV data URI to keep mobile OS audio session active during background playback
-const SILENT_AUDIO_URI = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+// Valid 352-byte silent MP3 frame data URI to keep mobile OS audio session active during background playback
+const SILENT_AUDIO_URI = 'data:audio/mp3;base64,//uQxAAAAAAAAAAAAAAAAAAAAAAAWGluZwAAAA8AAAACAAACcQCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgAAACcQCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgAAAA';
 
 export default function YouTubeAudioEngine({
   currentSong,
@@ -545,12 +545,14 @@ export default function YouTubeAudioEngine({
         if (playerRef.current && isReadyRef.current) {
           try { playerRef.current.pauseVideo(); } catch (e) {}
         }
+        pendingSeekTimeRef.current = initialSeek;
         if (lastSongIdRef.current !== songId) {
           lastSongIdRef.current = songId;
           audioRef.current.src = targetSrc;
-        }
-        if (initialSeek > 0) {
-          audioRef.current.currentTime = initialSeek;
+        } else if (initialSeek > 0) {
+          try {
+            audioRef.current.currentTime = initialSeek;
+          } catch (e) {}
         }
         audioRef.current.volume = volumeRef.current;
         audioRef.current.play().catch(() => {});
@@ -659,23 +661,23 @@ export default function YouTubeAudioEngine({
       }
 
       if (audioRef.current) {
+        pendingSeekTimeRef.current = initialSeek;
         audioRef.current.src = targetSrc;
-        if (initialSeek > 0) {
-          audioRef.current.currentTime = initialSeek;
-        }
         audioRef.current.volume = volumeRef.current;
         if (isPlaying) {
           audioRef.current.play().catch((err) => {
             console.warn('[SyncTune Audio] Direct play deferred:', err);
           });
 
-          // 2.5s fast watchdog: if native audio does not start, failover to YouTube iframe
-          playWatchdogRef.current = setTimeout(() => {
-            if (!nativeAudioStartedRef.current && isPlayingRef.current && !useIframeFallbackRef.current) {
-              console.warn('[SyncTune Audio] Failover to YouTube iframe after timeout');
-              playWithYouTubeEngine(currentSong.id, initialSeek);
-            }
-          }, 2500);
+          // 7s watchdog: only fallback if stream is not a direct CDN URL
+          if (!hasDirectAudio) {
+            playWatchdogRef.current = setTimeout(() => {
+              if (!nativeAudioStartedRef.current && isPlayingRef.current && !useIframeFallbackRef.current) {
+                console.warn('[SyncTune Audio] Failover to YouTube iframe after timeout');
+                playWithYouTubeEngine(currentSong.id, initialSeek);
+              }
+            }, 7000);
+          }
         }
       }
     }
@@ -734,6 +736,25 @@ export default function YouTubeAudioEngine({
         ref={audioRef}
         playsInline
         preload="auto"
+        onLoadedMetadata={(e) => {
+          if (pendingSeekTimeRef.current > 0) {
+            try {
+              e.currentTarget.currentTime = pendingSeekTimeRef.current;
+            } catch (err) {}
+            pendingSeekTimeRef.current = 0;
+          }
+        }}
+        onCanPlay={(e) => {
+          if (pendingSeekTimeRef.current > 0) {
+            try {
+              e.currentTarget.currentTime = pendingSeekTimeRef.current;
+            } catch (err) {}
+            pendingSeekTimeRef.current = 0;
+          }
+          if (isPlayingRef.current && audioRef.current && audioRef.current.paused) {
+            audioRef.current.play().catch(() => {});
+          }
+        }}
         onPlaying={() => {
           nativeAudioStartedRef.current = true;
           if (playWatchdogRef.current) {

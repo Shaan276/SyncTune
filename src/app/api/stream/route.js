@@ -58,20 +58,22 @@ async function searchExactSaavn(rawTitle, rawArtist, onDebug = null) {
   let artist = rawArtist || '';
 
   // If title has "Artist - Song", extract both
-  if (title.includes(' - ')) {
-    const parts = title.split(' - ');
+  if (/[-–—]/.test(title)) {
+    const parts = title.split(/[-–—]/);
     if (parts.length >= 2) {
       if (!artist || artist.toLowerCase().includes('artist') || artist.toLowerCase().includes('youtube') || parts[0].toLowerCase().replace(/\s+/g, '') === artist.toLowerCase().replace(/\s+/g, '')) {
         artist = parts[0].trim();
       }
-      title = parts.slice(1).join(' - ').trim();
+      title = parts.slice(1).join(' ').trim();
     }
   }
 
-  // Clean title BEFORE cleanText so parentheticals (Lyric Video), [Official Audio] are stripped
+  // Clean title BEFORE cleanText so parentheticals, brackets, and feat/ft are stripped
   let cleanRawTitle = (title || '')
     .replace(/\(.*?\)/g, '')
-    .replace(/\[.*?\]/g, '');
+    .replace(/\[.*?\]/g, '')
+    .replace(/\b(ft|feat|featuring)\b.*$/i, '')
+    .trim();
 
   let normTitle = cleanText(cleanRawTitle)
     .replace(/\b(official|video|audio|lyrics?|hd|4k|remastered|full song|visualizer|music video|lyric video)\b/gi, '')
@@ -89,48 +91,50 @@ async function searchExactSaavn(rawTitle, rawArtist, onDebug = null) {
   const titleWords = normTitle.split(/\s+/).filter(w => w.length > 2);
   const artistWords = normArtist.split(/\s+/).filter(w => w.length > 2);
 
-  const query = `${normTitle} ${normArtist}`.trim();
-  if (onDebug) onDebug({ normTitle, normArtist, query, titleWords, artistWords });
-  if (!query) return null;
+  const queries = [];
+  if (normTitle && normArtist) queries.push(`${normTitle} ${normArtist}`);
+  if (normTitle) queries.push(normTitle);
+
+  if (queries.length === 0) return null;
+  if (onDebug) onDebug({ normTitle, normArtist, queries, titleWords, artistWords });
 
   try {
-    const url = `https://www.jiosaavn.com/api.php?__call=search.getResults&q=${encodeURIComponent(query)}&_format=json&_marker=0&ctx=web6dot0&api_version=4`;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 3500);
-    const res = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept-Language': 'en-US,en;q=0.9'
-      },
-      signal: controller.signal
-    });
-    clearTimeout(timeout);
-    if (!res.ok) {
-      if (onDebug) onDebug({ error: 'fetch failed', status: res.status });
-      return null;
+    const fetchCandidates = async (q) => {
+      try {
+        const url = `https://www.jiosaavn.com/api.php?__call=search.getResults&q=${encodeURIComponent(q)}&_format=json&_marker=0&ctx=web6dot0&api_version=4`;
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 2500);
+        const res = await fetch(url, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept-Language': 'en-US,en;q=0.9'
+          },
+          signal: controller.signal
+        });
+        clearTimeout(timeout);
+        if (!res.ok) return [];
+        const data = await res.json();
+        return data.results || [];
+      } catch (e) {
+        return [];
+      }
+    };
+
+    const fetchLists = await Promise.all(queries.map(q => fetchCandidates(q)));
+    const seenIds = new Set();
+    const results = [];
+    for (const list of fetchLists) {
+      for (const item of list) {
+        if (item && item.id && !seenIds.has(item.id)) {
+          seenIds.add(item.id);
+          results.push(item);
+        }
+      }
     }
-    const data = await res.json();
-    let results = data.results || [];
+
     if (onDebug) onDebug({ resultsCount: results.length, firstThree: results.slice(0, 3).map(r => ({ title: r.title, subtitle: r.subtitle })) });
 
-    // Fallback query if no results with combined artist
-    if (results.length === 0 && normTitle.length > 3) {
-      try {
-        const fbUrl = `https://www.jiosaavn.com/api.php?__call=search.getResults&q=${encodeURIComponent(normTitle)}&_format=json&_marker=0&ctx=web6dot0&api_version=4`;
-        const fbController = new AbortController();
-        const fbTimeout = setTimeout(() => fbController.abort(), 2000);
-        const fbRes = await fetch(fbUrl, {
-          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
-          signal: fbController.signal
-        });
-        clearTimeout(fbTimeout);
-        if (fbRes.ok) {
-          const fbData = await fbRes.json();
-          results = fbData.results || [];
-        }
-      } catch (e) {}
-    }
-
+    // Pass 1: Strict matching with artist check
     for (const item of results) {
       const itemTitle = cleanText(item.title);
       const itemSubtitle = cleanText(item.subtitle);
@@ -165,9 +169,56 @@ async function searchExactSaavn(rawTitle, rawArtist, onDebug = null) {
         }
       }
     }
+
+    // Pass 2: Fallback title matching (if artist info in YouTube differed)
+    if (artistWords.length > 0) {
+      for (const item of results) {
+        const itemTitle = cleanText(item.title);
+        const itemSubtitle = cleanText(item.subtitle);
+        const combined = `${itemTitle} ${itemSubtitle}`;
+
+        const hasBadWord = BAD_WORDS.some(bw => combined.includes(bw) && !normTitle.includes(bw));
+        if (hasBadWord) continue;
+
+        const matchesTitle = (titleWords.length >= 2 || normTitle.length >= 5) && titleWords.every(w => itemTitle.includes(w));
+        if (!matchesTitle) continue;
+
+        const enc = item.more_info?.encrypted_media_url;
+        if (enc) {
+          const directUrl = decryptSaavnUrl(enc);
+          if (directUrl) {
+            return {
+              matchedTitle: item.title,
+              matchedArtist: item.subtitle,
+              url: directUrl
+            };
+          }
+        }
+      }
+    }
   } catch (e) {}
 
   return null;
+}
+
+async function fetchVideoOembed(videoId) {
+  if (!videoId) return null;
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 1200);
+    const res = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}&format=json`, {
+      signal: controller.signal
+    });
+    clearTimeout(timeout);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return {
+      title: data.title || '',
+      artist: data.author_name || ''
+    };
+  } catch (e) {
+    return null;
+  }
 }
 
 async function getAudioUrl(videoId) {
@@ -202,8 +253,18 @@ async function getAudioUrl(videoId) {
 export async function HEAD(request) {
   const { searchParams } = new URL(request.url);
   const rawId = searchParams.get('id');
-  const title = (searchParams.get('title') || '').trim();
-  const artist = (searchParams.get('artist') || '').trim();
+  let title = (searchParams.get('title') || '').trim();
+  let artist = (searchParams.get('artist') || '').trim();
+
+  const videoId = rawId ? rawId.replace(/\.(m4a|mp3|mp4|webm)$/i, '') : '';
+
+  if (!title && videoId) {
+    const oembed = await fetchVideoOembed(videoId);
+    if (oembed?.title) {
+      title = oembed.title;
+      if (!artist && oembed.artist) artist = oembed.artist;
+    }
+  }
 
   // 1. High-speed verified vocal CDN lookup
   if (title) {
@@ -213,9 +274,8 @@ export async function HEAD(request) {
     }
   }
 
-  if (!rawId) return new Response(null, { status: 400 });
+  if (!videoId) return new Response(null, { status: 400 });
 
-  const videoId = rawId.replace(/\.(m4a|mp3|mp4|webm)$/i, '');
   const audioUrl = await getAudioUrl(videoId);
   if (!audioUrl) return new Response(null, { status: 502 });
 
@@ -246,27 +306,36 @@ export async function HEAD(request) {
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const rawId = searchParams.get('id');
-  const title = (searchParams.get('title') || '').trim();
-  const artist = (searchParams.get('artist') || '').trim();
+  let title = (searchParams.get('title') || '').trim();
+  let artist = (searchParams.get('artist') || '').trim();
   const debug = searchParams.get('debug');
+
+  const videoId = rawId ? rawId.replace(/\.(m4a|mp3|mp4|webm)$/i, '') : '';
+
+  if (!title && videoId) {
+    const oembed = await fetchVideoOembed(videoId);
+    if (oembed?.title) {
+      title = oembed.title;
+      if (!artist && oembed.artist) artist = oembed.artist;
+    }
+  }
 
   // 1. High-speed verified vocal CDN lookup
   if (title) {
     let debugInfo = null;
     const directMatch = await searchExactSaavn(title, artist, (info) => { debugInfo = info; });
     if (debug) {
-      return NextResponse.json({ debugInfo, directMatch });
+      return NextResponse.json({ debugInfo, directMatch, title, artist, videoId });
     }
     if (directMatch?.url) {
       return NextResponse.redirect(directMatch.url, 307);
     }
   }
 
-  if (!rawId) {
+  if (!videoId) {
     return NextResponse.json({ error: 'Missing video id parameter' }, { status: 400 });
   }
 
-  const videoId = rawId.replace(/\.(m4a|mp3|mp4|webm)$/i, '');
   let audioUrl = await getAudioUrl(videoId);
   if (!audioUrl) {
     return NextResponse.json({

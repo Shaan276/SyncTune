@@ -6,14 +6,14 @@ export const dynamic = 'force-dynamic';
 const CLOUD_ROOMS_BIN = 'https://extendsclass.com/api/json-storage/bin/fdddbaf';
 
 const DEFAULT_ROOM_QUEUE = [
-  { id: 'kJQP7kiw5Fk', title: 'Despacito', artist: 'Luis Fonsi ft. Daddy Yankee', thumbnail: 'https://img.youtube.com/vi/kJQP7kiw5Fk/mqdefault.jpg', duration: 282 },
-  { id: '2Vv-BfVoq4g', title: 'Perfect', artist: 'Ed Sheeran', thumbnail: 'https://img.youtube.com/vi/2Vv-BfVoq4g/mqdefault.jpg', duration: 263 },
-  { id: 'JGwWNGJdvx8', title: 'Shape of You', artist: 'Ed Sheeran', thumbnail: 'https://img.youtube.com/vi/JGwWNGJdvx8/mqdefault.jpg', duration: 233 },
-  { id: 'TUVcZfQe-Kw', title: 'Levitating', artist: 'Dua Lipa', thumbnail: 'https://img.youtube.com/vi/TUVcZfQe-Kw/mqdefault.jpg', duration: 203 },
-  { id: 'H5v3kku4y6Q', title: 'As It Was', artist: 'Harry Styles', thumbnail: 'https://img.youtube.com/vi/H5v3kku4y6Q/mqdefault.jpg', duration: 167 },
-  { id: 'kTJczUoc268', title: 'Stay', artist: 'The Kid LAROI & Justin Bieber', thumbnail: 'https://img.youtube.com/vi/kTJczUoc268/mqdefault.jpg', duration: 141 },
-  { id: 'fJ9rUzIMcZQ', title: 'Bohemian Rhapsody', artist: 'Queen', thumbnail: 'https://img.youtube.com/vi/fJ9rUzIMcZQ/mqdefault.jpg', duration: 359 },
-  { id: '7wtfhZwyrcc', title: 'Believer', artist: 'Imagine Dragons', thumbnail: 'https://img.youtube.com/vi/7wtfhZwyrcc/mqdefault.jpg', duration: 204 }
+  { id: 'kJQP7kiw5Fk', title: 'Despacito', artist: 'Luis Fonsi ft. Daddy Yankee', thumbnail: 'https://img.youtube.com/vi/kJQP7kiw5Fk/mqdefault.jpg', duration: 282, audioUrl: 'https://aac.saavncdn.com/705/55ced133b69ce20dd82fc6f049d58dfd_320.mp4' },
+  { id: '2Vv-BfVoq4g', title: 'Perfect', artist: 'Ed Sheeran', thumbnail: 'https://img.youtube.com/vi/2Vv-BfVoq4g/mqdefault.jpg', duration: 263, audioUrl: 'https://aac.saavncdn.com/286/71bb6cc3391ddf619a4a3f1a1134f1c4_320.mp4' },
+  { id: 'JGwWNGJdvx8', title: 'Shape of You', artist: 'Ed Sheeran', thumbnail: 'https://img.youtube.com/vi/JGwWNGJdvx8/mqdefault.jpg', duration: 233, audioUrl: 'https://aac.saavncdn.com/286/2929d11a5d44a3592ced0383fa6f1977_320.mp4' },
+  { id: 'TUVcZfQe-Kw', title: 'Levitating', artist: 'Dua Lipa', thumbnail: 'https://img.youtube.com/vi/TUVcZfQe-Kw/mqdefault.jpg', duration: 203, audioUrl: 'https://aac.saavncdn.com/665/7790c3b9097592113008eaf1031d6e57_320.mp4' },
+  { id: 'H5v3kku4y6Q', title: 'As It Was', artist: 'Harry Styles', thumbnail: 'https://img.youtube.com/vi/H5v3kku4y6Q/mqdefault.jpg', duration: 167, audioUrl: 'https://aac.saavncdn.com/720/ae1594f81fac092f502317bc4e25a5b2_320.mp4' },
+  { id: 'kTJczUoc268', title: 'Stay', artist: 'The Kid LAROI & Justin Bieber', thumbnail: 'https://img.youtube.com/vi/kTJczUoc268/mqdefault.jpg', duration: 141, audioUrl: 'https://aac.saavncdn.com/895/9a3f48fb98e9dd0b201f6cacfb554408_320.mp4' },
+  { id: 'fJ9rUzIMcZQ', title: 'Bohemian Rhapsody', artist: 'Queen', thumbnail: 'https://img.youtube.com/vi/fJ9rUzIMcZQ/mqdefault.jpg', duration: 359, audioUrl: 'https://aac.saavncdn.com/285/d9149bb073b722d5b07e650d37ef574c_320.mp4' },
+  { id: '7wtfhZwyrcc', title: 'Believer', artist: 'Imagine Dragons', thumbnail: 'https://img.youtube.com/vi/7wtfhZwyrcc/mqdefault.jpg', duration: 204, audioUrl: 'https://aac.saavncdn.com/248/46944eb7b4b31f5b0abf5eb2e1be2d2a_320.mp4' }
 ];
 
 if (!global._synctune_rooms) {
