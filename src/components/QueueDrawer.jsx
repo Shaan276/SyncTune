@@ -145,8 +145,9 @@ export default function QueueDrawer({
               </span>
               <div className="p-3 rounded-xl bg-gradient-to-r from-emerald-500/10 via-[#0F1626] to-[#0F1626] border border-emerald-500/20 flex items-center gap-3">
                 <img
-                  src={currentSong.thumbnail || `https://img.youtube.com/vi/${currentSong.id}/mqdefault.jpg`}
+                  src={currentSong.thumbnail || (/^[a-zA-Z0-9_-]{11}$/.test(currentSong.id) ? `https://img.youtube.com/vi/${currentSong.id}/mqdefault.jpg` : 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=300&auto=format&fit=crop&q=80')}
                   alt=""
+                  onError={(e) => { e.currentTarget.src = 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=300&auto=format&fit=crop&q=80'; }}
                   className="w-12 h-12 rounded-lg object-cover shrink-0 shadow-md border border-white/5"
                 />
                 <div className="flex-1 min-w-0">
@@ -203,8 +204,9 @@ export default function QueueDrawer({
                         #{idx + 1}
                       </span>
                       <img
-                        src={song.thumbnail || `https://img.youtube.com/vi/${song.id}/mqdefault.jpg`}
+                        src={song.thumbnail || (/^[a-zA-Z0-9_-]{11}$/.test(song.id) ? `https://img.youtube.com/vi/${song.id}/mqdefault.jpg` : 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=300&auto=format&fit=crop&q=80')}
                         alt=""
+                        onError={(e) => { e.currentTarget.src = 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=300&auto=format&fit=crop&q=80'; }}
                         className="w-10 h-10 rounded-lg object-cover shrink-0 border border-white/5"
                       />
                       <div className="flex-1 min-w-0">

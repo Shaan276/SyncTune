@@ -71,7 +71,7 @@ export async function POST(request) {
       title: song.title || 'Unknown Title',
       artist: song.artist || 'Unknown Artist',
       duration: song.duration || 210,
-      thumbnail: song.thumbnail || `https://img.youtube.com/vi/${song.id}/mqdefault.jpg`,
+      thumbnail: song.thumbnail || (/^[a-zA-Z0-9_-]{11}$/.test(song.id) ? `https://img.youtube.com/vi/${song.id}/mqdefault.jpg` : 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=500&auto=format&fit=crop&q=80'),
       listenedAt: new Date().toISOString()
     };
 

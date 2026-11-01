@@ -98,7 +98,7 @@ async function searchSaavnFast(query, maxDurationSeconds = 600) {
       const enc = item.more_info?.encrypted_media_url;
       const directAudioUrl = enc ? decryptSaavnUrl(enc) : null;
       const rawImg = item.image || '';
-      const thumbnail = rawImg ? rawImg.replace('150x150', '500x500') : `https://img.youtube.com/vi/${item.id}/mqdefault.jpg`;
+      const thumbnail = rawImg ? rawImg.replace('150x150', '500x500') : (/^[a-zA-Z0-9_-]{11}$/.test(item.id) ? `https://img.youtube.com/vi/${item.id}/mqdefault.jpg` : 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=500&auto=format&fit=crop&q=80');
 
       songs.push({
         id: item.id || `saavn_${Date.now()}_${Math.random()}`,
