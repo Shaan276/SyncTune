@@ -242,7 +242,7 @@ export async function GET(request) {
 
   const cacheKey = `${category}_${query.toLowerCase()}`;
   const cached = searchCache.get(cacheKey);
-  if (cached && Date.now() - cached.timestamp < 30 * 60 * 1000) {
+  if (cached && Date.now() - cached.timestamp < 5 * 60 * 1000) {
     return NextResponse.json(cached.data);
   }
 
