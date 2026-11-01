@@ -22,7 +22,9 @@ export default function FriendsView({ user, setActiveRoom, setActiveTab }) {
 
     if (!isSilent) setRefreshing(true);
     try {
-      const res = await fetch(`/api/friends?userId=${encodeURIComponent(currentUserId)}&_t=${Date.now()}`);
+      const uName = encodeURIComponent(user?.username || '');
+      const uEmail = encodeURIComponent(user?.email || '');
+      const res = await fetch(`/api/friends?userId=${encodeURIComponent(currentUserId)}&username=${uName}&email=${uEmail}&_t=${Date.now()}`);
       if (res.ok) {
         const data = await res.json();
         if (data.success && Array.isArray(data.friends)) {
@@ -35,7 +37,7 @@ export default function FriendsView({ user, setActiveRoom, setActiveTab }) {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [currentUserId]);
+  }, [currentUserId, user?.username, user?.email]);
 
   useEffect(() => {
     fetchFriends();

@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Radio, Plus, MessageSquare, ThumbsUp, Users, Play, LogOut, Search, Sparkles, Zap, ArrowRight, Copy, Check, Lock, Crown, Shield, Music2 } from 'lucide-react';
 import { searchYouTube, fetchLiveRecommendations, formatTime } from '../../lib/youtube';
 
@@ -103,7 +103,8 @@ export default function RoomsView({
   activeRoom,
   setActiveRoom,
   currentSong,
-  onPlaySong
+  onPlaySong,
+  activeRoomMeta
 }) {
   const [inputCode, setInputCode] = useState('');
   const [copiedCode, setCopiedCode] = useState(false);
@@ -164,10 +165,28 @@ export default function RoomsView({
         } else if (msg.type === 'REACTION' && msg.emoji) {
           triggerLocalReaction(msg.emoji, msg.senderName || 'Listener');
         } else if (msg.type === 'UPVOTE' && msg.songId) {
-          setQueueVotes((prev) => ({
-            ...prev,
-            [msg.songId]: (prev[msg.songId] || 0) + 1
-          }));
+          const voter = msg.voterId;
+          setQueueVotes((prev) => {
+            const currentList = Array.isArray(prev[msg.songId])
+              ? [...prev[msg.songId]]
+              : (typeof prev[msg.songId] === 'number' && prev[msg.songId] > 0
+                ? Array.from({ length: prev[msg.songId] }, (_, i) => `v_${i}`)
+                : []);
+            if (voter) {
+              const idx = currentList.indexOf(voter);
+              if (idx >= 0) {
+                currentList.splice(idx, 1);
+              } else {
+                currentList.push(voter);
+              }
+            } else {
+              currentList.push('anon_' + Date.now());
+            }
+            return {
+              ...prev,
+              [msg.songId]: currentList
+            };
+          });
         } else if (msg.type === 'ADD_QUEUE' && msg.song) {
           setRoomRecommendations((prev) => {
             if (prev.some((s) => s.id === msg.song.id)) return prev;
@@ -207,14 +226,49 @@ export default function RoomsView({
             });
           }
 
-          if (data.queueVotes) setQueueVotes(data.queueVotes);
+          if (data.queueVotes) {
+            setQueueVotes((prev) => {
+              const prevStr = JSON.stringify(prev || {});
+              const newStr = JSON.stringify(data.queueVotes);
+              return prevStr === newStr ? prev : data.queueVotes;
+            });
+          }
           if (data.queue && Array.isArray(data.queue) && data.queue.length > 0) {
-            setRoomRecommendations(data.queue);
+            setRoomRecommendations((prev) => {
+              const prevIds = (prev || []).map((s) => s.id).join(',');
+              const newIds = data.queue.map((s) => s.id).join(',');
+              return prevIds === newIds ? prev : data.queue;
+            });
           }
         }
       }
     } catch (e) {}
   }, []);
+
+  // Sync real-time updates from parent long-polling ping (Zero polling lag)
+  useEffect(() => {
+    if (!activeRoomMeta) return;
+    if (activeRoomMeta.members) setMembers(activeRoomMeta.members);
+    if (activeRoomMeta.host_name) setRoomHost(activeRoomMeta.host_name);
+    if (activeRoomMeta.host_id) setRoomHostId(activeRoomMeta.host_id);
+    if (activeRoomMeta.allowListenerControl !== undefined) {
+      setRoomAllowListenerControl(activeRoomMeta.allowListenerControl !== false);
+    }
+    if (activeRoomMeta.queueVotes) {
+      setQueueVotes((prev) => {
+        const prevStr = JSON.stringify(prev || {});
+        const newStr = JSON.stringify(activeRoomMeta.queueVotes);
+        return prevStr === newStr ? prev : activeRoomMeta.queueVotes;
+      });
+    }
+    if (activeRoomMeta.queue && Array.isArray(activeRoomMeta.queue)) {
+      setRoomRecommendations((prev) => {
+        const prevIds = (prev || []).map((s) => s.id).join(',');
+        const newIds = activeRoomMeta.queue.map((s) => s.id).join(',');
+        return prevIds === newIds ? prev : activeRoomMeta.queue;
+      });
+    }
+  }, [activeRoomMeta]);
 
   useEffect(() => {
     if (!activeRoom) return;
@@ -318,7 +372,11 @@ export default function RoomsView({
         setMembers(data.members || []);
 
         if (data.chats) setChats(data.chats);
-        if (data.queueVotes) setQueueVotes(data.queueVotes);
+        if (data.queueVotes || data.room.queueVotes) setQueueVotes(data.queueVotes || data.room.queueVotes);
+        if ((data.queue && Array.isArray(data.queue)) || (data.room.queue && Array.isArray(data.room.queue))) {
+          const incomingQ = data.queue || data.room.queue;
+          if (incomingQ.length > 0) setRoomRecommendations(incomingQ);
+        }
 
         // Immediately start listening if room has an active song playing!
         if (data.currentSong && data.isPlaying && onPlaySong) {
@@ -330,14 +388,24 @@ export default function RoomsView({
     }
   };
 
-  // 4. Room Leave Handler
+  // 4. Room Leave Handler (Immediate optimistic exit & audio stop)
   const handleLeaveRoom = async () => {
     if (!activeRoom) return;
     const code = activeRoom;
     const stableUser = getStableUser(user);
 
+    // 1. Immediately detach UI and pause audio optimistically
+    setActiveRoom(null);
+    setMembers([]);
+    setChats([]);
+    setQueueVotes({});
+    if (typeof window !== 'undefined' && window.syncTunePauseAudio) {
+      window.syncTunePauseAudio();
+    }
+
+    // 2. Notify server and cloud in background
     try {
-      await fetch('/api/room', {
+      fetch('/api/room', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -345,13 +413,8 @@ export default function RoomsView({
           code,
           user: stableUser
         })
-      });
+      }).catch(() => {});
     } catch (e) {}
-
-    setActiveRoom(null);
-    setMembers([]);
-    setChats([]);
-    setQueueVotes({});
   };
 
   // 4b. Toggle Control Mode (Host Only vs Everyone)
@@ -544,30 +607,64 @@ export default function RoomsView({
   };
 
   const handleUpvote = async (song) => {
-    if (!activeRoom) return;
+    if (!activeRoom || !song?.id) return;
     const songId = song.id;
+    const stableUser = getStableUser(user);
+    const voterId = String(stableUser.id || stableUser.email || stableUser.username || 'user');
 
-    setQueueVotes((prev) => ({
-      ...prev,
-      [songId]: (prev[songId] || 0) + 1
-    }));
+    // Optimistically toggle / add vote
+    setQueueVotes((prev) => {
+      const currentList = Array.isArray(prev[songId])
+        ? [...prev[songId]]
+        : (typeof prev[songId] === 'number' && prev[songId] > 0
+          ? Array.from({ length: prev[songId] }, (_, i) => `v_${i}`)
+          : []);
+      const idx = currentList.indexOf(voterId);
+      if (idx >= 0) {
+        currentList.splice(idx, 1);
+      } else {
+        currentList.push(voterId);
+      }
+      return {
+        ...prev,
+        [songId]: currentList
+      };
+    });
 
     try {
       const ch = new BroadcastChannel('synctune_room_events_' + activeRoom);
-      ch.postMessage({ type: 'UPVOTE', songId });
+      ch.postMessage({ type: 'UPVOTE', songId, voterId });
       ch.close();
     } catch (e) {}
 
     try {
-      await fetch('/api/room', {
+      const res = await fetch('/api/room', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'upvote',
           code: activeRoom,
-          songId
+          songId,
+          user: stableUser
         })
       });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.votes) {
+          setQueueVotes((prev) => {
+            const prevStr = JSON.stringify(prev || {});
+            const newStr = JSON.stringify(data.votes);
+            return prevStr === newStr ? prev : data.votes;
+          });
+        }
+        if (data.queue && Array.isArray(data.queue)) {
+          setRoomRecommendations((prev) => {
+            const prevIds = (prev || []).map((s) => s.id).join(',');
+            const newIds = data.queue.map((s) => s.id).join(',');
+            return prevIds === newIds ? prev : data.queue;
+          });
+        }
+      }
     } catch (e) {}
   };
 
@@ -579,13 +676,21 @@ export default function RoomsView({
     }
   };
 
-  // Queue is dynamically sorted by votes, with predefined songs always present
-  const activeQueueList = roomRecommendations && roomRecommendations.length > 0 ? roomRecommendations : DEFAULT_ROOM_QUEUE;
-  const sortedRecommendations = [...activeQueueList].sort((a, b) => {
-    const votesA = queueVotes[a.id] || 0;
-    const votesB = queueVotes[b.id] || 0;
-    return votesB - votesA;
-  });
+  // Queue is dynamically sorted by collective votes, memoized to prevent re-rendering/flickering
+  const sortedRecommendations = useMemo(() => {
+    const activeQueueList = roomRecommendations && roomRecommendations.length > 0 ? roomRecommendations : DEFAULT_ROOM_QUEUE;
+    const getCount = (songId) => {
+      const v = queueVotes[songId];
+      if (Array.isArray(v)) return v.length;
+      if (typeof v === 'number') return v;
+      return v ? 1 : 0;
+    };
+    return [...activeQueueList].sort((a, b) => {
+      const votesA = getCount(a.id);
+      const votesB = getCount(b.id);
+      return votesB - votesA;
+    });
+  }, [roomRecommendations, queueVotes]);
 
   return (
     <div className="flex flex-col gap-6 pb-28 relative">
@@ -870,12 +975,23 @@ export default function RoomsView({
 
                 <div className="flex flex-col gap-2">
                   {sortedRecommendations.map((song, idx) => {
-                    const votes = queueVotes[song.id] || 0;
+                    const votesData = queueVotes[song.id];
+                    const voteCount = Array.isArray(votesData)
+                      ? votesData.length
+                      : (typeof votesData === 'number' ? votesData : (votesData ? 1 : 0));
+                    const currentVoterId = String(user?.id || user?.email || user?.username || '');
+                    const hasUserVoted = Array.isArray(votesData) && currentVoterId && (
+                      votesData.includes(currentVoterId) ||
+                      votesData.includes(String(user?.id)) ||
+                      votesData.includes(String(user?.email || '').toLowerCase()) ||
+                      votesData.includes(String(user?.username || '').toLowerCase())
+                    );
+
                     return (
                       <div
                         key={song.id}
                         className={`p-3 px-4 rounded-xl bg-[#080C14] border border-white/5 flex items-center justify-between gap-3 transition-all min-w-0 ${
-                          idx === 0 && votes > 0 ? 'border-emerald-500/50 bg-emerald-500/5' : ''
+                          idx === 0 && voteCount > 0 ? 'border-emerald-500/50 bg-emerald-500/5' : ''
                         }`}
                       >
                         <div className="flex items-center gap-3 min-w-0 flex-1">
@@ -900,13 +1016,14 @@ export default function RoomsView({
                             type="button"
                             onClick={() => handleUpvote(song)}
                             className={`px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                              votes > 0
+                              hasUserVoted || voteCount > 0
                                 ? 'bg-emerald-500 text-black font-extrabold shadow-md'
                                 : 'bg-white/5 hover:bg-white/10 text-zinc-300'
                             }`}
+                            title={hasUserVoted ? 'You upvoted this song (click to remove)' : 'Upvote song'}
                           >
-                            <ThumbsUp className="w-3 h-3" />
-                            <span>{votes}</span>
+                            <ThumbsUp className={`w-3 h-3 ${hasUserVoted ? 'fill-current' : ''}`} />
+                            <span>{voteCount}</span>
                           </button>
 
                           <button

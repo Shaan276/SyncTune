@@ -92,8 +92,8 @@ export default function Home() {
   canControlMusicRef.current = canControlMusic;
 
   const handleSetActiveRoom = useCallback((roomCode) => {
-    if (roomCode && roomCode !== activeRoomRef.current) {
-      // Immediately stop current solo song when host or joiner enters a room!
+    if (roomCode !== activeRoomRef.current) {
+      // Immediately stop playback and reset state when switching rooms or leaving a room
       setIsPlaying(false);
       if (typeof window !== 'undefined' && window.syncTunePauseAudio) {
         window.syncTunePauseAudio();
@@ -102,6 +102,7 @@ export default function Home() {
       setCurrentTime(0);
       setActiveRoomMeta(null);
     }
+    activeRoomRef.current = roomCode;
     setActiveRoom(roomCode);
   }, []);
 
@@ -902,6 +903,7 @@ export default function Home() {
               setActiveRoom={handleSetActiveRoom}
               currentSong={currentSong}
               onPlaySong={handlePlaySong}
+              activeRoomMeta={activeRoomMeta}
             />
           )}
 

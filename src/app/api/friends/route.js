@@ -4,12 +4,17 @@ export const dynamic = 'force-dynamic';
 
 const CLOUD_FRIENDS_BIN = 'https://extendsclass.com/api/json-storage/bin/ddaeeaf';
 const CLOUD_USERS_BIN = 'https://extendsclass.com/api/json-storage/bin/fccfdcb';
+const CLOUD_ROOMS_BIN = 'https://extendsclass.com/api/json-storage/bin/fdddbaf';
 
 if (!global._synctune_friends_cache) {
   global._synctune_friends_cache = {
     data: null,
     lastFetched: 0
   };
+}
+
+if (!global._synctune_user_heartbeats) {
+  global._synctune_user_heartbeats = {};
 }
 
 async function getFriendsData(forceFresh = false) {
@@ -60,15 +65,23 @@ async function saveFriendsData(data) {
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const userId = searchParams.get('userId');
+  const reqUsername = (searchParams.get('username') || '').trim().toLowerCase();
+  const reqEmail = (searchParams.get('email') || '').trim().toLowerCase();
 
   if (!userId) {
     return NextResponse.json({ success: true, friends: [], requests: [] });
   }
 
+  // Record requester presence / heartbeat
+  const now = Date.now();
+  const normalizedId = String(userId).toLowerCase();
+  global._synctune_user_heartbeats[normalizedId] = now;
+  if (reqUsername) global._synctune_user_heartbeats[reqUsername] = now;
+  if (reqEmail) global._synctune_user_heartbeats[reqEmail] = now;
+
   const { friendships, friendRequests } = await getFriendsData(true);
 
   // Find all friends connected to this user (matches user1 or user2 by id or email)
-  const normalizedId = String(userId).toLowerCase();
   const userFriendIds = friendships
     .filter((f) => String(f.user1).toLowerCase() === normalizedId || String(f.user2).toLowerCase() === normalizedId)
     .map((f) => (String(f.user1).toLowerCase() === normalizedId ? f.user2 : f.user1));
@@ -79,19 +92,38 @@ export async function GET(request) {
   // Load user details from cloud users
   let allUsers = [];
   try {
-    const uRes = await fetch(`${CLOUD_USERS_BIN}?_t=${Date.now()}`, { cache: 'no-store' });
+    const uRes = await fetch(`${CLOUD_USERS_BIN}?_t=${now}`, { cache: 'no-store' });
     if (uRes.ok) {
       const uData = await uRes.json();
       allUsers = uData.users || [];
     }
   } catch (e) {}
 
-  // Active rooms from memory to show what friends are listening to
-  const activeRooms = global._synctune_rooms || {};
+  // Active rooms from cloud multi-device store + in-memory store
+  let activeRooms = { ...(global._synctune_rooms || {}) };
+  try {
+    const rRes = await fetch(`${CLOUD_ROOMS_BIN}?_t=${now}`, {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store'
+    });
+    if (rRes.ok) {
+      const rData = await rRes.json();
+      if (rData && typeof rData.rooms === 'object' && rData.rooms) {
+        activeRooms = { ...activeRooms, ...rData.rooms };
+      }
+    }
+  } catch (e) {}
+
+  const heartbeats = global._synctune_user_heartbeats || {};
 
   const friendList = userFriendIds.map((fId) => {
     const targetKey = String(fId).toLowerCase();
-    const u = allUsers.find((x) => String(x.id).toLowerCase() === targetKey || (x.email && x.email.toLowerCase() === targetKey)) || {
+    const u = allUsers.find(
+      (x) =>
+        String(x.id).toLowerCase() === targetKey ||
+        (x.email && x.email.toLowerCase() === targetKey) ||
+        (x.username && x.username.toLowerCase() === targetKey)
+    ) || {
       id: fId,
       username: 'Friend',
       email: ''
@@ -100,20 +132,43 @@ export async function GET(request) {
     // Check if this friend is active in any room
     let activeRoomCode = null;
     let roomSong = null;
+    let isPlaying = false;
+
     for (const [code, room] of Object.entries(activeRooms)) {
-      if ((room.members || []).some((m) => String(m.id).toLowerCase() === targetKey || (m.username && m.username.toLowerCase() === u.username.toLowerCase()))) {
-        activeRoomCode = code;
-        roomSong = room.currentSong;
+      if (!room) continue;
+      const members = Array.isArray(room.members) ? room.members : [];
+      const isMember = members.some(
+        (m) =>
+          String(m.id).toLowerCase() === targetKey ||
+          (m.username && m.username.toLowerCase() === (u.username || '').toLowerCase()) ||
+          (m.email && m.email.toLowerCase() === (u.email || '').toLowerCase())
+      );
+      const isHost =
+        String(room.host_id).toLowerCase() === targetKey ||
+        (room.host_name && room.host_name.toLowerCase() === (u.username || '').toLowerCase());
+
+      if (isMember || isHost) {
+        activeRoomCode = room.code || code;
+        roomSong = room.currentSong || null;
+        isPlaying = Boolean(room.isPlaying);
         break;
       }
     }
 
+    const friendHb =
+      heartbeats[targetKey] ||
+      (u.email ? heartbeats[u.email.toLowerCase()] : 0) ||
+      (u.username ? heartbeats[u.username.toLowerCase()] : 0);
+    const isHeartbeatActive = Boolean(friendHb && now - friendHb < 60000);
+    const isOnline = Boolean(activeRoomCode) || isHeartbeatActive || Boolean(u.lastSeen && now - u.lastSeen < 180000);
+    const status = activeRoomCode ? (isPlaying ? 'listening' : 'in_room') : (isOnline ? 'active' : 'offline');
+
     return {
-      id: u.id,
-      name: u.username,
-      email: u.email,
-      is_online: Boolean(activeRoomCode) || Boolean(u.lastSeen && (Date.now() - u.lastSeen < 120000)),
-      status: activeRoomCode ? 'listening' : 'active',
+      id: u.id || fId,
+      name: u.username || 'Friend',
+      email: u.email || '',
+      is_online: isOnline,
+      status: status,
       active_room: activeRoomCode,
       currentSong: roomSong
     };

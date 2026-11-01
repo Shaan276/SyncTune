@@ -41,29 +41,58 @@ function generateUniqueCode() {
   return `SYNC${num}`;
 }
 
-async function syncRoomToCloud(room) {
-  try {
-    const res = await fetch(CLOUD_ROOMS_BIN, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        rooms: {
-          [room.code]: room
-        }
-      })
-    });
-  } catch (e) {}
+function getVoteScore(v) {
+  if (Array.isArray(v)) return v.length;
+  if (typeof v === 'number') return v;
+  return v ? 1 : 0;
 }
 
-async function getOrCreateRoom(code, user = null) {
-  if (!roomsStore[code]) {
-    // Try cloud bin fetch first
+async function getCloudRooms() {
+  try {
+    const res = await fetch(`${CLOUD_ROOMS_BIN}?_t=${Date.now()}`, {
+      headers: { 'Accept': 'application/json' },
+      cache: 'no-store'
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return (data && typeof data.rooms === 'object' && data.rooms) ? data.rooms : {};
+    }
+  } catch (e) {
+    console.warn('Cloud rooms fetch warning:', e.message);
+  }
+  return {};
+}
+
+async function syncRoomToCloud(room) {
+  try {
+    const existing = await getCloudRooms();
+    if (room && room.code) {
+      if (!room.members || room.members.length === 0) {
+        delete existing[room.code];
+      } else {
+        const { _lastCloudFetch, ...saveableRoom } = room;
+        existing[room.code] = saveableRoom;
+      }
+    }
+    await fetch(CLOUD_ROOMS_BIN, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rooms: existing })
+    });
+  } catch (e) {
+    console.warn('Cloud rooms save warning:', e.message);
+  }
+}
+
+async function getOrCreateRoom(code, user = null, forceCloud = false) {
+  const now = Date.now();
+  if (!roomsStore[code] || forceCloud || (now - (roomsStore[code]._lastCloudFetch || 0) > 2000)) {
     try {
-      const res = await fetch(`${CLOUD_ROOMS_BIN}?_t=${Date.now()}`, { cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.rooms && data.rooms[code]) {
-          roomsStore[code] = data.rooms[code];
+      const cloudRooms = await getCloudRooms();
+      if (cloudRooms && cloudRooms[code]) {
+        const cloudRoom = cloudRooms[code];
+        if (!roomsStore[code] || (cloudRoom.version || 0) >= (roomsStore[code].version || 0)) {
+          roomsStore[code] = { ...cloudRoom, _lastCloudFetch: now };
         }
       }
     } catch (e) {}
@@ -86,7 +115,8 @@ async function getOrCreateRoom(code, user = null) {
       lastEvent: null,
       chats: [],
       queue: [...DEFAULT_ROOM_QUEUE],
-      queueVotes: {}
+      queueVotes: {},
+      _lastCloudFetch: now
     };
   }
   if (!roomsStore[code].queue) roomsStore[code].queue = [...DEFAULT_ROOM_QUEUE];
@@ -99,7 +129,7 @@ function advanceRoomToNextSong(room) {
   if (!room.queue || room.queue.length === 0) {
     room.queue = [...DEFAULT_ROOM_QUEUE];
   }
-  room.queue.sort((a, b) => (room.queueVotes[b.id] || 0) - (room.queueVotes[a.id] || 0));
+  room.queue.sort((a, b) => getVoteScore(room.queueVotes[b.id]) - getVoteScore(room.queueVotes[a.id]));
 
   const nextSong = room.queue.shift();
   if (nextSong) {
@@ -510,13 +540,33 @@ export async function POST(request) {
       }
     }
 
-    // 10. UPVOTE SONG IN ROOM QUEUE
+    // 10. UPVOTE SONG IN ROOM QUEUE (Collective 1 + 1 + 1 votes across all players)
     if (action === 'upvote') {
       if (body.songId) {
-        room.queueVotes[body.songId] = (room.queueVotes[body.songId] || 0) + 1;
-        if (room.queue) {
-          room.queue.sort((a, b) => (room.queueVotes[b.id] || 0) - (room.queueVotes[a.id] || 0));
+        if (!room.queueVotes || typeof room.queueVotes !== 'object') {
+          room.queueVotes = {};
         }
+
+        const voterId = String(user?.id || user?.email || user?.username || 'voter');
+        let currentVoters = Array.isArray(room.queueVotes[body.songId])
+          ? [...room.queueVotes[body.songId]]
+          : (typeof room.queueVotes[body.songId] === 'number' && room.queueVotes[body.songId] > 0
+            ? Array.from({ length: room.queueVotes[body.songId] }, (_, i) => `v_${i}`)
+            : []);
+
+        const idx = currentVoters.indexOf(voterId);
+        if (idx >= 0) {
+          currentVoters.splice(idx, 1);
+        } else {
+          currentVoters.push(voterId);
+        }
+
+        room.queueVotes[body.songId] = currentVoters;
+
+        if (room.queue) {
+          room.queue.sort((a, b) => getVoteScore(room.queueVotes[b.id]) - getVoteScore(room.queueVotes[a.id]));
+        }
+
         room.version = (room.version || 0) + 1;
         room.lastEvent = {
           type: 'QUEUE_UPDATED',
@@ -524,8 +574,9 @@ export async function POST(request) {
           votes: room.queueVotes,
           version: room.version
         };
+
         notifyRoomListeners(room);
-        syncRoomToCloud(room);
+        await syncRoomToCloud(room);
         return NextResponse.json({ success: true, votes: room.queueVotes, queue: room.queue });
       }
     }
@@ -548,10 +599,23 @@ export async function POST(request) {
 
     // 12. LEAVE ROOM
     if (action === 'leave') {
-      room.members = room.members.filter((m) => String(m.id) !== String(user.id));
+      const currentUserId = String(user.id).toLowerCase();
+      const currentUserName = String(user.username || '').toLowerCase();
+      room.members = (room.members || []).filter(
+        (m) => String(m.id).toLowerCase() !== currentUserId && String(m.username).toLowerCase() !== currentUserName
+      );
       if (room.members.length === 0) {
         delete roomsStore[code];
       }
+      room.version = (room.version || 0) + 1;
+      room.lastEvent = {
+        type: 'MEMBER_LEFT',
+        userId: user.id,
+        username: user.username,
+        version: room.version
+      };
+      notifyRoomListeners(room);
+      await syncRoomToCloud(room);
       return NextResponse.json({ success: true });
     }
 
