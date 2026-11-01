@@ -15,16 +15,7 @@ export default function AuthModal({ onLogin, onClose, allowClose = false }) {
       const stored = localStorage.getItem('synctune_registered_accounts');
       if (stored) return JSON.parse(stored);
     } catch (e) {}
-    // Default admin account
-    return [
-      {
-        id: 1,
-        username: 'Piyush',
-        email: 'piyushpilkhwal74@gmail.com',
-        password: 'admin',
-        role: 'admin'
-      }
-    ];
+    return [];
   };
 
   const saveLocalAccounts = (accounts) => {
@@ -115,13 +106,12 @@ export default function AuthModal({ onLogin, onClose, allowClose = false }) {
         return;
       }
 
-      const isAdmin = cleanEmail === 'piyushpilkhwal74@gmail.com' || cleanUsername.toLowerCase() === 'piyush';
       const newAcc = {
         id: Date.now(),
         username: cleanUsername,
         email: cleanEmail,
         password: password,
-        role: isAdmin ? 'admin' : 'user'
+        role: 'user'
       };
 
       localList.push(newAcc);

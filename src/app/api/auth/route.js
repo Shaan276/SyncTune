@@ -23,16 +23,7 @@ function getAccountsFromDisk() {
       if (Array.isArray(parsed) && parsed.length > 0) return parsed;
     }
   } catch (err) {}
-  return [
-    {
-      id: 1,
-      username: 'Piyush',
-      email: 'piyushpilkhwal74@gmail.com',
-      password: 'admin',
-      role: 'admin',
-      createdAt: '2026-08-30T00:00:00.000Z'
-    }
-  ];
+  return [];
 }
 
 function saveAccountsToDisk(accounts) {
@@ -160,13 +151,12 @@ export async function POST(request) {
         }, { status: 409 });
       }
 
-      const isAdmin = email === 'piyushpilkhwal74@gmail.com' || rawUsername.toLowerCase() === 'piyush';
       const newAccount = {
         id: Date.now(),
         username: rawUsername,
         email,
         password,
-        role: isAdmin ? 'admin' : 'user',
+        role: 'user',
         createdAt: new Date().toISOString()
       };
 
