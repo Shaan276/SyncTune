@@ -202,6 +202,30 @@ export default function Home() {
       .catch(() => {});
   }, [user?.id]);
 
+  // Global Presence Heartbeat: Ping server every 30s so friend status is always accurate (<= 5 min rule)
+  useEffect(() => {
+    if (!user || (!user.id && !user.email)) return;
+    const sendPresence = () => {
+      const uId = user.id || user.email;
+      if (!uId) return;
+      const uName = encodeURIComponent(user.username || '');
+      const uEmail = encodeURIComponent(user.email || '');
+      const room = encodeURIComponent(activeRoomRef.current || '');
+      const playing = isPlayingRef.current ? '1' : '0';
+      const songTitle = currentSongRef.current?.title ? encodeURIComponent(currentSongRef.current.title) : '';
+      const songArtist = currentSongRef.current?.artist ? encodeURIComponent(currentSongRef.current.artist) : '';
+      const songId = currentSongRef.current?.id || '';
+
+      fetch(
+        `/api/friends?action=heartbeat&userId=${encodeURIComponent(uId)}&username=${uName}&email=${uEmail}&activeRoom=${room}&isPlaying=${playing}&songTitle=${songTitle}&songArtist=${songArtist}&songId=${songId}&_t=${Date.now()}`
+      ).catch(() => {});
+    };
+
+    sendPresence();
+    const interval = setInterval(sendPresence, 30000);
+    return () => clearInterval(interval);
+  }, [user?.id, user?.username, user?.email, isPlaying, currentSong?.id, activeRoom]);
+
   const handleRefreshQueue = useCallback(async (overrideMode) => {
     const baseSong = currentSongRef.current || queueRef.current[0] || (history.length > 0 ? history[0] : null);
     if (!baseSong) return;

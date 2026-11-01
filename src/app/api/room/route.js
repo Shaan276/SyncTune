@@ -59,13 +59,33 @@ function getVoteScore(v) {
 
 async function getCloudRooms() {
   try {
-    const res = await fetch(`${CLOUD_ROOMS_BIN}?_t=${Date.now()}`, {
+    const now = Date.now();
+    const res = await fetch(`${CLOUD_ROOMS_BIN}?_t=${now}`, {
       headers: { 'Accept': 'application/json' },
       cache: 'no-store'
     });
     if (res.ok) {
       const data = await res.json();
-      return (data && typeof data.rooms === 'object' && data.rooms) ? data.rooms : {};
+      const rooms = (data && typeof data.rooms === 'object' && data.rooms) ? data.rooms : {};
+
+      // 5-Minute Stale Room Auto-Purge: Clean up rooms with no activity for 5 minutes
+      let hasStale = false;
+      for (const [code, r] of Object.entries(rooms)) {
+        if (!r || !r.lastUpdated || (now - r.lastUpdated > 5 * 60 * 1000)) {
+          delete rooms[code];
+          if (roomsStore[code]) delete roomsStore[code];
+          hasStale = true;
+        }
+      }
+      if (hasStale) {
+        fetch(CLOUD_ROOMS_BIN, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ rooms })
+        }).catch(() => {});
+      }
+
+      return rooms;
     }
   } catch (e) {
     console.warn('Cloud rooms fetch warning:', e.message);

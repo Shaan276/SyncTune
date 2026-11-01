@@ -20,7 +20,7 @@ if (!global._synctune_user_heartbeats) {
 async function getFriendsData(forceFresh = false) {
   const cache = global._synctune_friends_cache;
   const now = Date.now();
-  if (!forceFresh && cache.data && (now - cache.lastFetched < 3000)) {
+  if (!forceFresh && cache.data && (now - cache.lastFetched < 2500)) {
     return cache.data;
   }
 
@@ -33,7 +33,8 @@ async function getFriendsData(forceFresh = false) {
       const data = await res.json();
       cache.data = {
         friendships: Array.isArray(data.friendships) ? data.friendships : [],
-        friendRequests: Array.isArray(data.friendRequests) ? data.friendRequests : []
+        friendRequests: Array.isArray(data.friendRequests) ? data.friendRequests : [],
+        presence: (data.presence && typeof data.presence === 'object') ? data.presence : {}
       };
       cache.lastFetched = now;
       return cache.data;
@@ -42,7 +43,7 @@ async function getFriendsData(forceFresh = false) {
     console.warn('Friends cloud fetch deferred:', e.message);
   }
 
-  return cache.data || { friendships: [], friendRequests: [] };
+  return cache.data || { friendships: [], friendRequests: [], presence: {} };
 }
 
 async function saveFriendsData(data) {
@@ -64,30 +65,61 @@ async function saveFriendsData(data) {
 
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
+  const action = (searchParams.get('action') || 'list').toLowerCase();
   const userId = searchParams.get('userId');
-  const reqUsername = (searchParams.get('username') || '').trim().toLowerCase();
+  const reqUsername = (searchParams.get('username') || '').trim();
   const reqEmail = (searchParams.get('email') || '').trim().toLowerCase();
+  const callerActiveRoom = (searchParams.get('activeRoom') || '').trim().toUpperCase();
+  const callerIsPlaying = searchParams.get('isPlaying') === '1';
+  const songId = searchParams.get('songId') || '';
+  const songTitle = searchParams.get('songTitle') || '';
+  const songArtist = searchParams.get('songArtist') || '';
 
   if (!userId) {
     return NextResponse.json({ success: true, friends: [], requests: [] });
   }
 
-  // Record requester presence / heartbeat
   const now = Date.now();
   const normalizedId = String(userId).toLowerCase();
-  global._synctune_user_heartbeats[normalizedId] = now;
-  if (reqUsername) global._synctune_user_heartbeats[reqUsername] = now;
-  if (reqEmail) global._synctune_user_heartbeats[reqEmail] = now;
 
-  const { friendships, friendRequests } = await getFriendsData(true);
+  const friendsData = await getFriendsData(true);
+  if (!friendsData.presence || typeof friendsData.presence !== 'object') {
+    friendsData.presence = {};
+  }
 
-  // Find all friends connected to this user (matches user1 or user2 by id or email)
-  const userFriendIds = friendships
+  // Update caller's cross-device presence in multi-container cloud presence
+  const callerPresence = {
+    lastSeen: now,
+    username: reqUsername || friendsData.presence[normalizedId]?.username || 'User',
+    email: reqEmail || friendsData.presence[normalizedId]?.email || '',
+    activeRoom: callerActiveRoom || null,
+    isPlaying: callerIsPlaying,
+    currentSong: songId ? { id: songId, title: songTitle, artist: songArtist } : null
+  };
+  friendsData.presence[normalizedId] = callerPresence;
+  if (reqEmail) friendsData.presence[reqEmail] = callerPresence;
+  if (reqUsername) friendsData.presence[reqUsername.toLowerCase()] = callerPresence;
+
+  // Debounce saving presence to cloud storage (at most once every 10s)
+  if (!global._synctune_last_presence_save || now - global._synctune_last_presence_save > 10000) {
+    global._synctune_last_presence_save = now;
+    saveFriendsData(friendsData).catch(() => {});
+  }
+
+  // Pure presence heartbeat response
+  if (action === 'heartbeat') {
+    return NextResponse.json({ success: true, timestamp: now });
+  }
+
+  // Find all friends connected to this user
+  const userFriendIds = (friendsData.friendships || [])
     .filter((f) => String(f.user1).toLowerCase() === normalizedId || String(f.user2).toLowerCase() === normalizedId)
     .map((f) => (String(f.user1).toLowerCase() === normalizedId ? f.user2 : f.user1));
 
   // Incoming friend requests for this user
-  const incoming = friendRequests.filter((r) => String(r.toUserId).toLowerCase() === normalizedId && r.status === 'pending');
+  const incoming = (friendsData.friendRequests || []).filter(
+    (r) => String(r.toUserId).toLowerCase() === normalizedId && r.status === 'pending'
+  );
 
   // Load user details from cloud users
   let allUsers = [];
@@ -99,7 +131,7 @@ export async function GET(request) {
     }
   } catch (e) {}
 
-  // Active rooms from cloud multi-device store + in-memory store
+  // Active rooms from cloud multi-device store with 5-minute auto-purge
   let activeRooms = { ...(global._synctune_rooms || {}) };
   try {
     const rRes = await fetch(`${CLOUD_ROOMS_BIN}?_t=${now}`, {
@@ -109,12 +141,27 @@ export async function GET(request) {
     if (rRes.ok) {
       const rData = await rRes.json();
       if (rData && typeof rData.rooms === 'object' && rData.rooms) {
-        activeRooms = { ...activeRooms, ...rData.rooms };
+        let hasStale = false;
+        const validRooms = {};
+        for (const [code, room] of Object.entries(rData.rooms)) {
+          // If room has had no activity for 5 minutes (300,000 ms), purge it!
+          if (!room || !room.lastUpdated || (now - room.lastUpdated > 5 * 60 * 1000)) {
+            hasStale = true;
+          } else {
+            validRooms[code] = room;
+          }
+        }
+        if (hasStale) {
+          fetch(CLOUD_ROOMS_BIN, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ rooms: validRooms })
+          }).catch(() => {});
+        }
+        activeRooms = { ...activeRooms, ...validRooms };
       }
     }
   } catch (e) {}
-
-  const heartbeats = global._synctune_user_heartbeats || {};
 
   const friendList = userFriendIds.map((fId) => {
     const targetKey = String(fId).toLowerCase();
@@ -129,48 +176,77 @@ export async function GET(request) {
       email: ''
     };
 
-    // Check if this friend is active in any room
+    // Find friend presence in multi-container cloud presence
+    const pres =
+      friendsData.presence[targetKey] ||
+      (u.email ? friendsData.presence[u.email.toLowerCase()] : null) ||
+      (u.username ? friendsData.presence[u.username.toLowerCase()] : null);
+
+    const lastSeenTime = pres?.lastSeen || u.lastSeen || 0;
+    // Strict 5-minute activity check: if active within last 5 minutes (300,000 ms), user is Online
+    const isOnline = Boolean(lastSeenTime && (now - lastSeenTime < 5 * 60 * 1000));
+
+    if (!isOnline) {
+      return {
+        id: u.id || fId,
+        name: u.username || 'Friend',
+        email: u.email || '',
+        is_online: false,
+        status: 'offline',
+        active_room: null,
+        currentSong: null,
+        lastSeen: lastSeenTime
+      };
+    }
+
+    // Friend is ONLINE (active within last 5 minutes)
     let activeRoomCode = null;
     let roomSong = null;
-    let isPlaying = false;
+    let isListening = false;
 
-    for (const [code, room] of Object.entries(activeRooms)) {
-      if (!room) continue;
-      const members = Array.isArray(room.members) ? room.members : [];
-      const isMember = members.some(
-        (m) =>
-          String(m.id).toLowerCase() === targetKey ||
-          (m.username && m.username.toLowerCase() === (u.username || '').toLowerCase()) ||
-          (m.email && m.email.toLowerCase() === (u.email || '').toLowerCase())
-      );
-      const isHost =
-        String(room.host_id).toLowerCase() === targetKey ||
-        (room.host_name && room.host_name.toLowerCase() === (u.username || '').toLowerCase());
+    // Check if friend reported an active room in presence
+    if (pres?.activeRoom && activeRooms[pres.activeRoom]) {
+      const room = activeRooms[pres.activeRoom];
+      activeRoomCode = room.code;
+      roomSong = room.currentSong || pres.currentSong;
+      isListening = Boolean(room.isPlaying || pres.isPlaying);
+    }
 
-      if (isMember || isHost) {
-        activeRoomCode = room.code || code;
-        roomSong = room.currentSong || null;
-        isPlaying = Boolean(room.isPlaying);
-        break;
+    // Otherwise check all active non-stale rooms
+    if (!activeRoomCode) {
+      for (const [code, room] of Object.entries(activeRooms)) {
+        if (!room) continue;
+        const members = Array.isArray(room.members) ? room.members : [];
+        const isMember = members.some(
+          (m) =>
+            String(m.id).toLowerCase() === targetKey ||
+            (m.username && m.username.toLowerCase() === (u.username || '').toLowerCase()) ||
+            (m.email && m.email.toLowerCase() === (u.email || '').toLowerCase())
+        );
+        const isHost =
+          String(room.host_id).toLowerCase() === targetKey ||
+          (room.host_name && room.host_name.toLowerCase() === (u.username || '').toLowerCase());
+
+        if (isMember || isHost) {
+          activeRoomCode = room.code || code;
+          roomSong = room.currentSong || null;
+          isListening = Boolean(room.isPlaying);
+          break;
+        }
       }
     }
 
-    const friendHb =
-      heartbeats[targetKey] ||
-      (u.email ? heartbeats[u.email.toLowerCase()] : 0) ||
-      (u.username ? heartbeats[u.username.toLowerCase()] : 0);
-    const isHeartbeatActive = Boolean(friendHb && now - friendHb < 60000);
-    const isOnline = Boolean(activeRoomCode) || isHeartbeatActive || Boolean(u.lastSeen && now - u.lastSeen < 180000);
-    const status = activeRoomCode ? (isPlaying ? 'listening' : 'in_room') : (isOnline ? 'active' : 'offline');
+    const status = activeRoomCode ? (isListening ? 'listening' : 'in_room') : 'active';
 
     return {
       id: u.id || fId,
       name: u.username || 'Friend',
       email: u.email || '',
-      is_online: isOnline,
+      is_online: true,
       status: status,
       active_room: activeRoomCode,
-      currentSong: roomSong
+      currentSong: roomSong,
+      lastSeen: lastSeenTime
     };
   });
 

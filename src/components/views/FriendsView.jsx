@@ -2,6 +2,16 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Users, UserPlus, Radio, Trash2, Search, RefreshCw, CheckCircle2, AlertCircle, Music, Shield } from 'lucide-react';
 
+function formatLastSeen(timestamp) {
+  if (!timestamp) return 'recently';
+  const diffMinutes = Math.floor((Date.now() - timestamp) / 60000);
+  if (diffMinutes < 1) return 'just now';
+  if (diffMinutes < 60) return `${diffMinutes}m ago`;
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  return `${Math.floor(diffHours / 24)}d ago`;
+}
+
 export default function FriendsView({ user, setActiveRoom, setActiveTab }) {
   const [friends, setFriends] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -184,15 +194,21 @@ export default function FriendsView({ user, setActiveRoom, setActiveTab }) {
           ) : (
             <div className="flex flex-col gap-3">
               {friends.map((f) => {
-                const isListening = f.status === 'listening' || Boolean(f.active_room);
+                const isListening = f.is_online && (f.status === 'listening' || (Boolean(f.active_room) && f.status !== 'in_room'));
+                const isInRoom = f.is_online && f.status === 'in_room' && !isListening;
+
                 const statusColor = isListening
                   ? 'text-cyan-400 bg-cyan-500/10 border-cyan-500/30'
+                  : isInRoom
+                  ? 'text-indigo-400 bg-indigo-500/10 border-indigo-500/30'
                   : f.is_online
                   ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30'
                   : 'text-zinc-500 bg-zinc-800/40 border-zinc-700/40';
 
                 const statusText = isListening
                   ? 'Listening 🎧'
+                  : isInRoom
+                  ? 'In Room 🟢'
                   : f.is_online
                   ? 'Online 🟢'
                   : 'Offline ⚪';
@@ -223,7 +239,7 @@ export default function FriendsView({ user, setActiveRoom, setActiveTab }) {
                         </div>
                         <div className="flex items-center gap-2 mt-0.5 text-xs text-zinc-400 truncate">
                           {f.email && <span className="truncate">{f.email}</span>}
-                          {f.active_room && (
+                          {f.is_online && f.active_room && (
                             <>
                               <span className="text-zinc-600">•</span>
                               <span className="text-cyan-400 font-mono font-bold shrink-0">
@@ -231,9 +247,17 @@ export default function FriendsView({ user, setActiveRoom, setActiveTab }) {
                               </span>
                             </>
                           )}
+                          {!f.is_online && f.lastSeen && (
+                            <>
+                              <span className="text-zinc-600">•</span>
+                              <span className="text-zinc-500 shrink-0">
+                                Active {formatLastSeen(f.lastSeen)}
+                              </span>
+                            </>
+                          )}
                         </div>
 
-                        {f.currentSong && (
+                        {f.is_online && f.currentSong && (
                           <div className="mt-1 flex items-center gap-1.5 text-[11px] text-zinc-300 truncate">
                             <Music className="w-3 h-3 text-cyan-400 shrink-0 animate-pulse" />
                             <span className="truncate">{f.currentSong.title}</span>
@@ -243,7 +267,7 @@ export default function FriendsView({ user, setActiveRoom, setActiveTab }) {
                     </div>
 
                     <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
-                      {f.active_room && (
+                      {f.is_online && f.active_room && (
                         <button
                           onClick={() => handleJoinFriendRoom(f.active_room)}
                           className="px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-extrabold flex items-center gap-1.5 transition-all cursor-pointer shadow-md shadow-emerald-500/20 active:scale-95"
