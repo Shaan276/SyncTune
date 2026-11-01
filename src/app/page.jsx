@@ -105,10 +105,14 @@ export default function Home() {
     setActiveRoom(roomCode);
   }, []);
 
-  // Hydrate user session, history & queue from localStorage
+  // Hydrate user session, history & queue from localStorage and register PWA Service Worker
   useEffect(() => {
     setIsClient(true);
     setCurrentUser(getStableUser(user));
+
+    if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    }
     try {
       const stored = localStorage.getItem('user');
       if (stored && stored !== 'undefined' && stored !== 'null') {
