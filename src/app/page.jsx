@@ -393,15 +393,17 @@ export default function Home() {
     };
   }, [activeRoom, handlePlaySong]);
 
-  // Global Real-Time Room Synchronizer (Synchronizes across all devices & tabs)
+  // Event-Driven Real-Time Room Synchronizer (Database push/ping, NO tight polling)
   useEffect(() => {
     if (!activeRoom) {
       setActiveRoomMeta(null);
       return;
     }
     let isCancelled = false;
+    let currentVersion = 0;
 
-    const syncRoom = async () => {
+    // 1. Initial State Fetch on Room Entry
+    const fetchInitialRoomState = async () => {
       try {
         const res = await fetch(`/api/room?action=get&code=${encodeURIComponent(activeRoom)}`);
         if (!res.ok) return;
@@ -409,43 +411,97 @@ export default function Home() {
         if (isCancelled || !data || !data.room) return;
 
         setActiveRoomMeta(data.room);
+        currentVersion = data.room.version || 1;
 
         const roomSong = data.room.currentSong;
         const roomPlaying = Boolean(data.room.isPlaying);
         const roomTime = data.room.currentTime || 0;
 
         if (roomSong && roomSong.id) {
-          // 1. Synchronize Song Playback from room
           if (!currentSongRef.current || currentSongRef.current.id !== roomSong.id) {
             handlePlaySong(roomSong, true);
           }
-
-          // 2. Synchronize Play / Pause State
-          if (roomPlaying !== isPlayingRef.current) {
-            setIsPlaying(roomPlaying);
-            if (roomPlaying) {
-              window.syncTunePlayAudio?.(roomSong?.id, roomSong?.audioUrl, roomSong?.title, roomSong?.artist);
-            } else {
-              window.syncTunePauseAudio?.();
+          if (roomPlaying) {
+            setIsPlaying(true);
+            window.syncTunePlayAudio?.(roomSong.id, roomSong.audioUrl, roomSong.title, roomSong.artist);
+            if (roomTime > 0) {
+              setCurrentTime(roomTime);
+              setTimeout(() => window.syncTuneSeekAudio?.(roomTime), 300);
             }
-          }
-
-          // 3. Drift Correction: Only while safely inside track playback (never near the end to avoid loop glitches!)
-          const trackDur = roomSong.duration || 180;
-          if (roomPlaying && roomTime > 1 && roomTime < trackDur - 3 && Math.abs(roomTime - currentTimeRef.current) > 3) {
-            setCurrentTime(roomTime);
-            window.syncTuneSeekAudio?.(roomTime);
+          } else {
+            setIsPlaying(false);
+            window.syncTunePauseAudio?.();
           }
         }
       } catch (err) {}
     };
 
-    syncRoom();
-    const interval = setInterval(syncRoom, 1200);
+    fetchInitialRoomState();
+
+    // 2. Server Ping Listener Loop: Server holds connection until a change occurs (Zero polling hammering)
+    const listenForDatabasePings = async () => {
+      while (!isCancelled && activeRoomRef.current) {
+        try {
+          const res = await fetch(
+            `/api/room?action=ping&code=${encodeURIComponent(activeRoomRef.current)}&version=${currentVersion}`
+          );
+          if (!res.ok) {
+            await new Promise((r) => setTimeout(r, 2000));
+            continue;
+          }
+
+          const data = await res.json();
+          if (isCancelled) break;
+
+          if (data.version !== undefined) {
+            currentVersion = data.version;
+          }
+
+          if (data.room) {
+            setActiveRoomMeta(data.room);
+          }
+
+          // Handle server-triggered event ping instantly
+          if (data.hasUpdate && data.event) {
+            const ev = data.event;
+
+            if (ev.type === 'PAUSE') {
+              setIsPlaying(false);
+              window.syncTunePauseAudio?.();
+              if (typeof ev.time === 'number') {
+                setCurrentTime(ev.time);
+                window.syncTuneSeekAudio?.(ev.time);
+              }
+            } else if (ev.type === 'PLAY') {
+              setIsPlaying(true);
+              window.syncTunePlayAudio?.();
+              if (typeof ev.time === 'number') {
+                setCurrentTime(ev.time);
+                window.syncTuneSeekAudio?.(ev.time);
+              }
+            } else if (ev.type === 'SEEK' && typeof ev.time === 'number') {
+              // Timeline scrub / seek event (e.g. 1:25 -> 3:27)
+              setCurrentTime(ev.time);
+              window.syncTuneSeekAudio?.(ev.time);
+            } else if (ev.type === 'TRACK_CHANGE' && ev.song) {
+              handlePlaySong(ev.song, true);
+              if (typeof ev.time === 'number' && ev.time > 0) {
+                setTimeout(() => window.syncTuneSeekAudio?.(ev.time), 350);
+              }
+            }
+          }
+        } catch (err) {
+          if (!isCancelled) {
+            await new Promise((r) => setTimeout(r, 2000));
+          }
+        }
+      }
+    };
+
+    listenForDatabasePings();
 
     return () => {
       isCancelled = true;
-      clearInterval(interval);
     };
   }, [activeRoom, handlePlaySong]);
 

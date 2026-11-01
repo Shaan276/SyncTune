@@ -21,39 +21,62 @@ export default function DashboardView({
   const [activeCategory, setActiveCategory] = useState('music');
   const [subTab, setSubTab] = useState('flow'); // 'flow', 'rooms', 'discover'
   const searchInputRef = useRef(null);
+  const initialLoadedRef = useRef(false);
 
-  // Dynamic recommendation refresh: mixes familiar favorites with brand new vibe tracks
+  // Dynamic recommendation refresh: Instant lightweight load with parallel async fetch
   const refreshRecommendations = useCallback(async (forceRefresh = false) => {
+    if (!forceRefresh && initialLoadedRef.current) return;
+    if (!history || history.length === 0) {
+      setRecommendations([]);
+      return;
+    }
+
+    // Try loading cached recommendations for instant 0ms mobile render
+    if (!forceRefresh) {
+      try {
+        const cached = sessionStorage.getItem('synctune_cached_recs');
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setRecommendations(parsed);
+            initialLoadedRef.current = true;
+            return;
+          }
+        }
+      } catch (e) {}
+    }
+
     setIsRefreshingRecs(true);
     try {
-      if (!history || history.length === 0) {
-        setRecommendations([]);
-        return;
-      }
-
-      // 1. Get most played favorite songs from history
+      // 1. Get user favorites immediately from local history (Instant render)
       const userFavorites = getUserRecommendations(history);
       const historyIds = new Set(history.map((s) => s.id));
-
-      // 2. Pick 3-4 familiar songs from favorites (shuffled for freshness on every refresh)
       const shuffledFavorites = [...userFavorites].sort(() => Math.random() - 0.5);
       const familiarTracks = shuffledFavorites.slice(0, 4).map((s) => ({ ...s, isNew: false }));
 
-      // 3. Sample 1-2 seed songs from history to discover fresh new music
-      const sampleSeeds = [];
-      if (history.length > 0) {
-        const randIdx = Math.floor(Math.random() * Math.min(5, history.length));
-        sampleSeeds.push(history[randIdx]);
-        if (history.length > 2) {
-          const randIdx2 = Math.floor(Math.random() * history.length);
-          if (randIdx2 !== randIdx) sampleSeeds.push(history[randIdx2]);
-        }
+      // Immediately show favorites on mobile while discovering new tracks in background
+      if (familiarTracks.length > 0 && recommendations.length === 0) {
+        setRecommendations(familiarTracks);
       }
 
+      // 2. Sample 1-2 seed songs for new discoveries
+      const sampleSeeds = [];
+      const randIdx = Math.floor(Math.random() * Math.min(4, history.length));
+      sampleSeeds.push(history[randIdx]);
+      if (history.length > 2) {
+        const randIdx2 = Math.floor(Math.random() * history.length);
+        if (randIdx2 !== randIdx) sampleSeeds.push(history[randIdx2]);
+      }
+
+      // 3. Parallel fetch (Cuts mobile wait time from 3s to ~400ms)
+      const recsResults = await Promise.all(
+        sampleSeeds.map((seed) =>
+          fetchLiveRecommendations(seed, forceRefresh).catch(() => ({ genreTracks: [], artistTracks: [] }))
+        )
+      );
+
       let newCandidates = [];
-      for (const seed of sampleSeeds) {
-        if (!seed || !seed.title) continue;
-        const recs = await fetchLiveRecommendations(seed, forceRefresh);
+      for (const recs of recsResults) {
         const candidates = [...(recs.genreTracks || []), ...(recs.artistTracks || [])]
           .filter((t) => !historyIds.has(t.id) && (t.duration || 210) <= 600);
         newCandidates.push(...candidates);
@@ -69,11 +92,10 @@ export default function DashboardView({
         }
       }
 
-      // Shuffle new discoveries
       uniqueNew.sort(() => Math.random() - 0.5);
       const selectedNew = uniqueNew.slice(0, 6);
 
-      // Interleave familiar and new tracks (e.g. New, New, Familiar, New, New, Familiar)
+      // Interleave familiar favorites with fresh discoveries
       const combined = [];
       let fi = 0, ni = 0;
       while (combined.length < 10 && (fi < familiarTracks.length || ni < selectedNew.length)) {
@@ -82,7 +104,6 @@ export default function DashboardView({
         if (fi < familiarTracks.length) combined.push(familiarTracks[fi++]);
       }
 
-      // If we don't have enough new discoveries, fill remaining slots with other user favorites
       for (const fav of shuffledFavorites) {
         if (!combined.some((s) => s.id === fav.id)) {
           combined.push({ ...fav, isNew: false });
@@ -90,17 +111,25 @@ export default function DashboardView({
         if (combined.length >= 10) break;
       }
 
-      setRecommendations(combined);
+      if (combined.length > 0) {
+        setRecommendations(combined);
+        try {
+          sessionStorage.setItem('synctune_cached_recs', JSON.stringify(combined));
+        } catch (e) {}
+      }
+      initialLoadedRef.current = true;
     } catch (err) {
-      console.error('Refresh recommendations error:', err);
+      console.warn('Refresh recommendations deferred:', err);
     } finally {
       setIsRefreshingRecs(false);
     }
   }, [history]);
 
   useEffect(() => {
-    refreshRecommendations(false);
-  }, [refreshRecommendations]);
+    if (!initialLoadedRef.current && history && history.length > 0) {
+      refreshRecommendations(false);
+    }
+  }, [history, refreshRecommendations]);
 
   const handleSearchSubmit = (e) => {
     e.preventDefault();

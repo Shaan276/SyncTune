@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
+import EventEmitter from 'events';
 
 export const dynamic = 'force-dynamic';
+
+const CLOUD_ROOMS_BIN = 'https://extendsclass.com/api/json-storage/bin/fdddbaf';
 
 const DEFAULT_ROOM_QUEUE = [
   { id: 'kJQP7kiw5Fk', title: 'Despacito', artist: 'Luis Fonsi ft. Daddy Yankee', thumbnail: 'https://img.youtube.com/vi/kJQP7kiw5Fk/mqdefault.jpg', duration: 282 },
@@ -13,12 +16,16 @@ const DEFAULT_ROOM_QUEUE = [
   { id: '7wtfhZwyrcc', title: 'Believer', artist: 'Imagine Dragons', thumbnail: 'https://img.youtube.com/vi/7wtfhZwyrcc/mqdefault.jpg', duration: 204 }
 ];
 
-// In-memory global store for rooms across requests
 if (!global._synctune_rooms) {
   global._synctune_rooms = {};
 }
-
 const roomsStore = global._synctune_rooms;
+
+if (!global._synctune_room_events) {
+  global._synctune_room_events = new EventEmitter();
+  global._synctune_room_events.setMaxListeners(300);
+}
+const roomEvents = global._synctune_room_events;
 
 function normalizeRoomCode(input) {
   if (!input) return '';
@@ -34,11 +41,64 @@ function generateUniqueCode() {
   return `SYNC${num}`;
 }
 
+async function syncRoomToCloud(room) {
+  try {
+    const res = await fetch(CLOUD_ROOMS_BIN, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        rooms: {
+          [room.code]: room
+        }
+      })
+    });
+  } catch (e) {}
+}
+
+async function getOrCreateRoom(code, user = null) {
+  if (!roomsStore[code]) {
+    // Try cloud bin fetch first
+    try {
+      const res = await fetch(`${CLOUD_ROOMS_BIN}?_t=${Date.now()}`, { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.rooms && data.rooms[code]) {
+          roomsStore[code] = data.rooms[code];
+        }
+      }
+    } catch (e) {}
+  }
+
+  if (!roomsStore[code]) {
+    roomsStore[code] = {
+      code,
+      host_name: user?.username || 'Host',
+      host_id: user?.id || 'host',
+      isPrivate: true,
+      allowListenerControl: true, // Collaborative by default; host can switch to host-only
+      controlMode: 'collaborative',
+      members: user ? [{ id: user.id, username: user.username, isHost: true, isOnline: true }] : [],
+      currentSong: null,
+      isPlaying: false,
+      currentTime: 0,
+      lastUpdated: Date.now(),
+      version: 1,
+      lastEvent: null,
+      chats: [],
+      queue: [...DEFAULT_ROOM_QUEUE],
+      queueVotes: {}
+    };
+  }
+  if (!roomsStore[code].queue) roomsStore[code].queue = [...DEFAULT_ROOM_QUEUE];
+  if (!roomsStore[code].queueVotes) roomsStore[code].queueVotes = {};
+  if (!roomsStore[code].version) roomsStore[code].version = 1;
+  return roomsStore[code];
+}
+
 function advanceRoomToNextSong(room) {
   if (!room.queue || room.queue.length === 0) {
     room.queue = [...DEFAULT_ROOM_QUEUE];
   }
-  // Sort queue by upvotes descending
   room.queue.sort((a, b) => (room.queueVotes[b.id] || 0) - (room.queueVotes[a.id] || 0));
 
   const nextSong = room.queue.shift();
@@ -48,45 +108,73 @@ function advanceRoomToNextSong(room) {
     room.currentTime = 0;
     room.isPlaying = true;
     room.lastUpdated = Date.now();
+    room.version = (room.version || 0) + 1;
+    room.lastEvent = {
+      type: 'TRACK_CHANGE',
+      song: nextSong,
+      time: 0,
+      version: room.version,
+      triggeredBy: 'AutoQueue'
+    };
   } else {
     room.currentSong = null;
     room.currentTime = 0;
     room.isPlaying = false;
+    room.version = (room.version || 0) + 1;
+    room.lastEvent = {
+      type: 'PAUSE',
+      time: 0,
+      version: room.version,
+      triggeredBy: 'AutoQueueEnd'
+    };
   }
+
+  notifyRoomListeners(room);
+  syncRoomToCloud(room);
   return room.currentSong;
 }
 
-function getOrCreateRoom(code, user = null) {
-  if (!roomsStore[code]) {
-    roomsStore[code] = {
-      code,
-      host_name: user?.username || 'Host',
-      host_id: user?.id || 'host',
-      isPrivate: true,
-      allowListenerControl: true,
-      controlMode: 'collaborative',
-      members: user ? [{ id: user.id, username: user.username, isHost: true, isOnline: true }] : [],
-      currentSong: null,
-      isPlaying: false,
-      currentTime: 0,
-      lastUpdated: Date.now(),
-      chats: [],
-      queue: [...DEFAULT_ROOM_QUEUE],
-      queueVotes: {}
-    };
+function notifyRoomListeners(room) {
+  roomEvents.emit(`room_update_${room.code}`, {
+    event: room.lastEvent,
+    version: room.version,
+    room: getSanitizedRoom(room)
+  });
+}
+
+function getSanitizedRoom(room) {
+  let currentCalculatedTime = room.currentTime || 0;
+  if (room.isPlaying && room.lastUpdated) {
+    const elapsed = Math.max(0, (Date.now() - room.lastUpdated) / 1000);
+    currentCalculatedTime += elapsed;
+    const trackDur = room.currentSong?.duration || 180;
+    if (currentCalculatedTime >= trackDur) {
+      currentCalculatedTime = trackDur;
+    }
   }
-  if (!roomsStore[code].queue) {
-    roomsStore[code].queue = [...DEFAULT_ROOM_QUEUE];
-  }
-  if (!roomsStore[code].queueVotes) {
-    roomsStore[code].queueVotes = {};
-  }
-  return roomsStore[code];
+
+  return {
+    code: room.code,
+    host_name: room.host_name,
+    host_id: room.host_id,
+    isPrivate: true,
+    allowListenerControl: room.allowListenerControl !== false,
+    controlMode: room.allowListenerControl === false ? 'host_only' : 'collaborative',
+    members: room.members || [],
+    currentSong: room.currentSong,
+    isPlaying: Boolean(room.isPlaying),
+    currentTime: currentCalculatedTime,
+    lastUpdated: room.lastUpdated || Date.now(),
+    version: room.version || 1,
+    queue: room.queue || DEFAULT_ROOM_QUEUE,
+    queueVotes: room.queueVotes || {},
+    chats: (room.chats || []).slice(-50)
+  };
 }
 
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
-  const action = searchParams.get('action') || 'list';
+  const action = (searchParams.get('action') || 'list').toLowerCase();
   const rawCode = searchParams.get('code');
   const code = normalizeRoomCode(rawCode);
 
@@ -106,40 +194,86 @@ export async function GET(request) {
     return NextResponse.json({ success: true, rooms: list });
   }
 
-  // 2. Get Room Status
+  // 2. Full Room State
   if (action === 'get' && code) {
-    const room = getOrCreateRoom(code);
-
-    let currentCalculatedTime = room.currentTime || 0;
-    if (room.isPlaying && room.lastUpdated) {
-      const elapsed = Math.max(0, (Date.now() - room.lastUpdated) / 1000);
-      currentCalculatedTime += elapsed;
-      const trackDur = room.currentSong?.duration || 180;
-      if (currentCalculatedTime >= trackDur) {
-        // Song completed! Automatically advance room to next upvoted track
-        advanceRoomToNextSong(room);
-        currentCalculatedTime = 0;
-      }
-    }
-
+    const room = await getOrCreateRoom(code);
     return NextResponse.json({
       success: true,
-      room: {
-        ...room,
-        currentTime: currentCalculatedTime,
-        queue: room.queue || DEFAULT_ROOM_QUEUE
-      },
+      room: getSanitizedRoom(room),
       members: room.members || [],
       currentSong: room.currentSong,
       isPlaying: Boolean(room.isPlaying),
-      currentTime: currentCalculatedTime,
-      lastUpdated: room.lastUpdated || Date.now(),
-      chats: room.chats || [],
+      currentTime: room.currentTime || 0,
+      version: room.version || 1,
       queue: room.queue || DEFAULT_ROOM_QUEUE,
-      queueVotes: room.queueVotes || {},
-      isPrivate: true,
-      allowListenerControl: room.allowListenerControl !== false,
-      controlMode: room.allowListenerControl === false ? 'host_only' : 'collaborative'
+      queueVotes: room.queueVotes || {}
+    });
+  }
+
+  // 3. Event Ping Listener (Zero Polling Hammering)
+  if (action === 'ping' && code) {
+    const clientVersion = parseInt(searchParams.get('version') || '0', 10);
+    const room = await getOrCreateRoom(code);
+
+    // If room already has a newer event than client's version, return immediately!
+    if ((room.version || 0) > clientVersion && room.lastEvent) {
+      return NextResponse.json({
+        success: true,
+        hasUpdate: true,
+        version: room.version,
+        event: room.lastEvent,
+        room: getSanitizedRoom(room)
+      });
+    }
+
+    // Otherwise wait for next event (up to 7.5 seconds)
+    return new Promise((resolve) => {
+      let resolved = false;
+
+      const onUpdate = (payload) => {
+        if (resolved) return;
+        resolved = true;
+        clearTimeout(timer);
+        roomEvents.removeListener(`room_update_${code}`, onUpdate);
+        resolve(
+          NextResponse.json({
+            success: true,
+            hasUpdate: true,
+            version: payload.version,
+            event: payload.event,
+            room: payload.room
+          })
+        );
+      };
+
+      const timer = setTimeout(async () => {
+        if (resolved) return;
+        resolved = true;
+        roomEvents.removeListener(`room_update_${code}`, onUpdate);
+
+        const currentRoom = await getOrCreateRoom(code);
+        if ((currentRoom.version || 0) > clientVersion && currentRoom.lastEvent) {
+          resolve(
+            NextResponse.json({
+              success: true,
+              hasUpdate: true,
+              version: currentRoom.version,
+              event: currentRoom.lastEvent,
+              room: getSanitizedRoom(currentRoom)
+            })
+          );
+        } else {
+          resolve(
+            NextResponse.json({
+              success: true,
+              hasUpdate: false,
+              version: currentRoom.version || 0
+            })
+          );
+        }
+      }, 7500);
+
+      roomEvents.once(`room_update_${code}`, onUpdate);
     });
   }
 
@@ -149,57 +283,61 @@ export async function GET(request) {
 export async function POST(request) {
   try {
     const body = await request.json().catch(() => ({}));
-    const action = body.action || 'join';
+    const action = (body.action || 'join').toLowerCase();
     const user = body.user || { id: Date.now(), username: body.username || 'Listener' };
+    const code = normalizeRoomCode(body.code);
 
     // 1. CREATE ROOM
     if (action === 'create') {
-      let code = normalizeRoomCode(body.code);
-      if (!code) {
-        code = generateUniqueCode();
-        while (roomsStore[code]) {
-          code = generateUniqueCode();
-        }
+      let roomCode = code || generateUniqueCode();
+      while (roomsStore[roomCode]) {
+        roomCode = generateUniqueCode();
       }
 
       const allowListenerControl = body.allowListenerControl !== undefined ? Boolean(body.allowListenerControl) : true;
 
-      roomsStore[code] = {
-        code,
+      const newRoom = {
+        code: roomCode,
         host_name: user.username || 'Host',
         host_id: user.id,
         isPrivate: true,
         allowListenerControl,
         controlMode: allowListenerControl ? 'collaborative' : 'host_only',
-        members: [
-          { id: user.id, username: user.username, isHost: true, isOnline: true }
-        ],
+        members: [{ id: user.id, username: user.username, isHost: true, isOnline: true }],
         currentSong: null,
         isPlaying: false,
         currentTime: 0,
         lastUpdated: Date.now(),
+        version: 1,
+        lastEvent: null,
         chats: [],
         queue: [...DEFAULT_ROOM_QUEUE],
         queueVotes: {}
       };
 
+      roomsStore[roomCode] = newRoom;
+      await syncRoomToCloud(newRoom);
+
       return NextResponse.json({
         success: true,
-        code,
-        room: roomsStore[code],
-        members: roomsStore[code].members
+        code: roomCode,
+        room: getSanitizedRoom(newRoom),
+        members: newRoom.members
       });
     }
 
+    if (!code) {
+      return NextResponse.json({ success: false, error: 'Room code required.' }, { status: 400 });
+    }
+
+    const room = await getOrCreateRoom(code, user);
+
+    // Check permissions
+    const isHost = String(room.host_id) === String(user.id) || (room.members || []).some((m) => String(m.id) === String(user.id) && m.isHost);
+    const canControl = room.allowListenerControl !== false || isHost;
+
     // 2. JOIN ROOM
     if (action === 'join') {
-      const code = normalizeRoomCode(body.code);
-      if (!code) {
-        return NextResponse.json({ success: false, error: 'Please enter a room code.' }, { status: 400 });
-      }
-
-      const room = getOrCreateRoom(code, user);
-
       const existingMember = room.members.find((m) => String(m.id) === String(user.id));
       if (!existingMember) {
         room.members.push({
@@ -210,54 +348,25 @@ export async function POST(request) {
         });
       }
 
-      let currentCalculatedTime = room.currentTime || 0;
-      if (room.isPlaying && room.lastUpdated) {
-        const elapsed = Math.max(0, (Date.now() - room.lastUpdated) / 1000);
-        currentCalculatedTime += elapsed;
-      }
-
       return NextResponse.json({
         success: true,
         code,
-        room: {
-          ...room,
-          currentTime: currentCalculatedTime
-        },
+        room: getSanitizedRoom(room),
         members: room.members,
         currentSong: room.currentSong,
         isPlaying: room.isPlaying,
-        currentTime: currentCalculatedTime,
+        currentTime: room.currentTime || 0,
+        version: room.version || 1,
         queue: room.queue || DEFAULT_ROOM_QUEUE,
-        queueVotes: room.queueVotes || {},
-        allowListenerControl: room.allowListenerControl !== false,
-        controlMode: room.allowListenerControl === false ? 'host_only' : 'collaborative'
+        queueVotes: room.queueVotes || {}
       });
     }
 
-    const code = normalizeRoomCode(body.code);
-    if (!code) {
-      return NextResponse.json({ success: false, error: 'Room code required.' }, { status: 400 });
-    }
-
-    const room = getOrCreateRoom(code, user);
-
-    // 3. BROADCAST SYNC / STATE REPLICATION
-    if (action === 'sync') {
-      if (body.currentSong !== undefined) room.currentSong = body.currentSong;
-      if (body.isPlaying !== undefined) room.isPlaying = Boolean(body.isPlaying);
-      if (body.currentTime !== undefined) room.currentTime = body.currentTime;
-      if (body.host_name) room.host_name = body.host_name;
-      if (body.allowListenerControl !== undefined) room.allowListenerControl = Boolean(body.allowListenerControl);
-      if (body.queueVotes) room.queueVotes = body.queueVotes;
-      if (body.chats && Array.isArray(body.chats)) {
-        room.chats = body.chats.slice(-50);
-      }
-      room.lastUpdated = Date.now();
-      return NextResponse.json({ success: true, room });
-    }
-
-    // 4. PLAY SONG IN ROOM
+    // 3. PLAY NEW SONG IN ROOM
     if (action === 'play') {
+      if (!canControl) {
+        return NextResponse.json({ success: false, error: '🔒 Only the room host can change music in this room.' }, { status: 403 });
+      }
       if (body.song) {
         if (room.queue) {
           room.queue = room.queue.filter((s) => s.id !== body.song.id);
@@ -267,23 +376,121 @@ export async function POST(request) {
         room.isPlaying = true;
         room.currentTime = body.currentTime || 0;
         room.lastUpdated = Date.now();
-        return NextResponse.json({ success: true, room });
+        room.version = (room.version || 0) + 1;
+        room.lastEvent = {
+          type: 'TRACK_CHANGE',
+          song: body.song,
+          time: room.currentTime,
+          version: room.version,
+          triggeredBy: user.username || 'Host'
+        };
+
+        notifyRoomListeners(room);
+        syncRoomToCloud(room);
+        return NextResponse.json({ success: true, room: getSanitizedRoom(room) });
       }
     }
 
-    // 5. NEXT / SKIP TO NEXT QUEUE SONG IN ROOM
+    // 4. PAUSE SONG IN ROOM
+    if (action === 'pause') {
+      if (!canControl) {
+        return NextResponse.json({ success: false, error: '🔒 Only the room host can pause music.' }, { status: 403 });
+      }
+      room.isPlaying = false;
+      if (body.currentTime !== undefined) {
+        room.currentTime = body.currentTime;
+      }
+      room.lastUpdated = Date.now();
+      room.version = (room.version || 0) + 1;
+      room.lastEvent = {
+        type: 'PAUSE',
+        time: room.currentTime,
+        version: room.version,
+        triggeredBy: user.username || 'Host'
+      };
+
+      notifyRoomListeners(room);
+      syncRoomToCloud(room);
+      return NextResponse.json({ success: true, room: getSanitizedRoom(room) });
+    }
+
+    // 5. RESUME / PLAY CURRENT SONG IN ROOM
+    if (action === 'resume' || action === 'play_current') {
+      if (!canControl) {
+        return NextResponse.json({ success: false, error: '🔒 Only the room host can resume music.' }, { status: 403 });
+      }
+      room.isPlaying = true;
+      if (body.currentTime !== undefined) {
+        room.currentTime = body.currentTime;
+      }
+      room.lastUpdated = Date.now();
+      room.version = (room.version || 0) + 1;
+      room.lastEvent = {
+        type: 'PLAY',
+        time: room.currentTime,
+        version: room.version,
+        triggeredBy: user.username || 'Host'
+      };
+
+      notifyRoomListeners(room);
+      syncRoomToCloud(room);
+      return NextResponse.json({ success: true, room: getSanitizedRoom(room) });
+    }
+
+    // 6. SEEK / TIMELINE CHANGE IN ROOM (e.g. Slide 1:25 -> 3:27)
+    if (action === 'seek') {
+      if (!canControl) {
+        return NextResponse.json({ success: false, error: '🔒 Only the room host can seek timeline.' }, { status: 403 });
+      }
+      room.currentTime = Number(body.currentTime) || 0;
+      room.lastUpdated = Date.now();
+      room.version = (room.version || 0) + 1;
+      room.lastEvent = {
+        type: 'SEEK',
+        time: room.currentTime,
+        version: room.version,
+        triggeredBy: user.username || 'Host'
+      };
+
+      notifyRoomListeners(room);
+      syncRoomToCloud(room);
+      return NextResponse.json({ success: true, room: getSanitizedRoom(room) });
+    }
+
+    // 7. NEXT SONG IN ROOM
     if (action === 'next') {
+      if (!canControl) {
+        return NextResponse.json({ success: false, error: '🔒 Only the room host can skip tracks.' }, { status: 403 });
+      }
       advanceRoomToNextSong(room);
       return NextResponse.json({
         success: true,
-        room,
-        currentSong: room.currentSong,
-        queue: room.queue || DEFAULT_ROOM_QUEUE,
-        queueVotes: room.queueVotes || {}
+        room: getSanitizedRoom(room),
+        currentSong: room.currentSong
       });
     }
 
-    // 6. ADD TO ROOM QUEUE
+    // 8. TOGGLE / SET CONTROL MODE (Host Only vs Everyone)
+    if (action === 'set_control_mode') {
+      if (!isHost) {
+        return NextResponse.json({ success: false, error: 'Only the room host can change room permissions.' }, { status: 403 });
+      }
+      room.allowListenerControl = Boolean(body.allowListenerControl);
+      room.controlMode = room.allowListenerControl ? 'collaborative' : 'host_only';
+      room.version = (room.version || 0) + 1;
+      room.lastEvent = {
+        type: 'CONTROL_MODE_CHANGED',
+        allowListenerControl: room.allowListenerControl,
+        version: room.version,
+        triggeredBy: user.username || 'Host'
+      };
+
+      notifyRoomListeners(room);
+      syncRoomToCloud(room);
+      return NextResponse.json({ success: true, room: getSanitizedRoom(room) });
+    }
+
+    // 9. ADD TO ROOM QUEUE
     if (action === 'add_queue') {
       if (body.song && body.song.id) {
         if (!room.queue) room.queue = [...DEFAULT_ROOM_QUEUE];
@@ -291,40 +498,39 @@ export async function POST(request) {
         if (!exists && (!room.currentSong || room.currentSong.id !== body.song.id)) {
           room.queue.push(body.song);
         }
+        room.version = (room.version || 0) + 1;
+        room.lastEvent = {
+          type: 'QUEUE_UPDATED',
+          queue: room.queue,
+          version: room.version
+        };
+        notifyRoomListeners(room);
+        syncRoomToCloud(room);
         return NextResponse.json({ success: true, queue: room.queue });
       }
     }
 
-    // 7. UPVOTE IN ROOM
+    // 10. UPVOTE SONG IN ROOM QUEUE
     if (action === 'upvote') {
       if (body.songId) {
         room.queueVotes[body.songId] = (room.queueVotes[body.songId] || 0) + 1;
-        // Keep queue sorted by upvotes
         if (room.queue) {
           room.queue.sort((a, b) => (room.queueVotes[b.id] || 0) - (room.queueVotes[a.id] || 0));
         }
+        room.version = (room.version || 0) + 1;
+        room.lastEvent = {
+          type: 'QUEUE_UPDATED',
+          queue: room.queue,
+          votes: room.queueVotes,
+          version: room.version
+        };
+        notifyRoomListeners(room);
+        syncRoomToCloud(room);
         return NextResponse.json({ success: true, votes: room.queueVotes, queue: room.queue });
       }
     }
 
-    // 8. PAUSE / RESUME IN ROOM
-    if (action === 'pause' || action === 'resume') {
-      room.isPlaying = action === 'resume';
-      if (body.currentTime !== undefined) {
-        room.currentTime = body.currentTime;
-      }
-      room.lastUpdated = Date.now();
-      return NextResponse.json({ success: true, room });
-    }
-
-    // 9. SEEK IN ROOM
-    if (action === 'seek') {
-      room.currentTime = body.currentTime || 0;
-      room.lastUpdated = Date.now();
-      return NextResponse.json({ success: true, room });
-    }
-
-    // 10. CHAT MESSAGE IN ROOM
+    // 11. CHAT MESSAGE IN ROOM
     if (action === 'chat') {
       if (body.message) {
         if (!room.chats) room.chats = [];
@@ -340,7 +546,7 @@ export async function POST(request) {
       }
     }
 
-    // 11. LEAVE ROOM
+    // 12. LEAVE ROOM
     if (action === 'leave') {
       room.members = room.members.filter((m) => String(m.id) !== String(user.id));
       if (room.members.length === 0) {
@@ -349,7 +555,7 @@ export async function POST(request) {
       return NextResponse.json({ success: true });
     }
 
-    return NextResponse.json({ success: true, room });
+    return NextResponse.json({ success: true, room: getSanitizedRoom(room) });
   } catch (err) {
     console.error("Room API Error:", err);
     return NextResponse.json({ success: false, error: 'Internal Server Error' }, { status: 500 });

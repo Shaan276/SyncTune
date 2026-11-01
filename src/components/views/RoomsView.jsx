@@ -211,22 +211,15 @@ export default function RoomsView({
           if (data.queue && Array.isArray(data.queue) && data.queue.length > 0) {
             setRoomRecommendations(data.queue);
           }
-
-          // If a song is actively playing in the room and differs from local
-          if (data.currentSong && data.currentSong.id && (!currentSong || currentSong.id !== data.currentSong.id)) {
-            if (onPlaySong) {
-              onPlaySong(data.currentSong, true);
-            }
-          }
         }
       }
     } catch (e) {}
-  }, [currentSong, onPlaySong]);
+  }, []);
 
   useEffect(() => {
     if (!activeRoom) return;
     syncRoomState(activeRoom);
-    const pollTimer = setInterval(() => syncRoomState(activeRoom), 1500);
+    const pollTimer = setInterval(() => syncRoomState(activeRoom), 4000);
     return () => clearInterval(pollTimer);
   }, [activeRoom, syncRoomState]);
 
@@ -359,6 +352,25 @@ export default function RoomsView({
     setMembers([]);
     setChats([]);
     setQueueVotes({});
+  };
+
+  // 4b. Toggle Control Mode (Host Only vs Everyone)
+  const handleToggleControlMode = async () => {
+    if (!isHost || !activeRoom) return;
+    const newAllow = !roomAllowListenerControl;
+    setRoomAllowListenerControl(newAllow);
+    try {
+      await fetch('/api/room', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'set_control_mode',
+          code: activeRoom,
+          allowListenerControl: newAllow,
+          user: getStableUser(user)
+        })
+      });
+    } catch (e) {}
   };
 
   // 5. Play song inside room & sync
@@ -721,16 +733,23 @@ export default function RoomsView({
                         <Lock className="w-3 h-3" />
                         <span>Private</span>
                       </span>
-                      <span
-                        className={`px-2 py-0.5 rounded text-[10px] font-black uppercase flex items-center gap-1 ${
+                      <button
+                        type="button"
+                        onClick={handleToggleControlMode}
+                        disabled={!isHost}
+                        className={`px-2 py-0.5 rounded text-[10px] font-black uppercase flex items-center gap-1 transition-all ${
+                          isHost ? 'cursor-pointer hover:scale-105 active:scale-95' : 'cursor-default'
+                        } ${
                           roomAllowListenerControl
                             ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
                             : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
                         }`}
+                        title={isHost ? 'Click to toggle Host Only vs Everyone Controls' : (roomAllowListenerControl ? 'Collaborative: Everyone can control music' : 'Host Only: Only host can control music')}
                       >
                         {roomAllowListenerControl ? <Users className="w-3 h-3" /> : <Crown className="w-3 h-3" />}
                         <span>{roomAllowListenerControl ? 'Everyone Controls' : 'Host Controls Only'}</span>
-                      </span>
+                        {isHost && <span className="text-[9px] opacity-70 underline ml-0.5">(change)</span>}
+                      </button>
                     </div>
                     <p className="text-xs text-zinc-400 truncate">
                       Host: <strong className="text-white">{roomHost || currentUser.username || 'Host'}</strong>
