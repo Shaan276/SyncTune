@@ -126,6 +126,21 @@ export async function POST(request) {
     // Always fetch latest cloud-synced accounts
     const accounts = await getAccounts(true);
 
+    // 0. VERIFY SESSION (Validates if existing user is still in database)
+    if (action === 'verify') {
+      const userKey = body.id ? String(body.id).toLowerCase() : '';
+      const userEmail = (body.email || email).trim().toLowerCase();
+      const account = accounts.find(
+        (a) => (userKey && String(a.id).toLowerCase() === userKey) ||
+               (userEmail && a.email.toLowerCase() === userEmail)
+      );
+      if (!account) {
+        return NextResponse.json({ success: false, error: 'Account has been deleted or does not exist.' }, { status: 404 });
+      }
+      const { password: _, ...safeUser } = account;
+      return NextResponse.json({ success: true, user: safeUser });
+    }
+
     // 1. REGISTER (Create New ID)
     if (action === 'register') {
       if (!rawUsername) {

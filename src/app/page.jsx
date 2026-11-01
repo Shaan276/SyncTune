@@ -119,6 +119,35 @@ export default function Home() {
         const parsed = JSON.parse(stored);
         setUser(parsed);
         setCurrentUser(parsed);
+
+        // Verify with live server database that this account still exists
+        fetch('/api/auth', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'verify', id: parsed.id, email: parsed.email })
+        })
+          .then((res) => {
+            if (res.status === 404 || !res.ok) {
+              // Account was deleted from server! Revoke session and kick to login screen
+              localStorage.removeItem('user');
+              localStorage.removeItem('token');
+              setUser(null);
+              setCurrentUser({ id: 'guest', username: 'Guest' });
+              setShowAuthModal(true);
+              if (typeof window !== 'undefined' && window.syncTunePauseAudio) {
+                window.syncTunePauseAudio();
+              }
+            } else {
+              return res.json().then((data) => {
+                if (data && data.user) {
+                  setUser(data.user);
+                  setCurrentUser(data.user);
+                  localStorage.setItem('user', JSON.stringify(data.user));
+                }
+              });
+            }
+          })
+          .catch(() => {});
       } else {
         setShowAuthModal(true);
       }
@@ -279,6 +308,10 @@ export default function Home() {
   // Play a song & synchronize with room members
   const handlePlaySong = useCallback((song, isFromRoomSync = false, isGoingBack = false) => {
     if (!song || !song.id) return;
+    if (!userRef.current && !isFromRoomSync) {
+      setShowAuthModal(true);
+      return;
+    }
 
     const isMixup = (song.title && (song.title.toLowerCase().includes('mashup') || song.title.toLowerCase().includes('mix') || song.title.toLowerCase().includes('remix')));
     if (!isMixup && (song.duration || 0) > 600) {
